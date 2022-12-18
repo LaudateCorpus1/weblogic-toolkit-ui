@@ -125,6 +125,11 @@ define(['models/wkt-project', 'utils/script-generator-base', 'utils/helm-helper'
           this._getOptionalScalarFieldValue(this.project.wko.javaLoggingFileCount), comment);
         this.adapter.addEmptyLine();
 
+        comment = [ 'The number of minutes for the helm command to wait for completion (e.g., 10)' ];
+        this.adapter.addVariableDefinition('HELM_TIMEOUT',
+          this._getOptionalScalarFieldValue(this.project.wko.helmTimeoutMinutes), comment);
+        this.adapter.addEmptyLine();
+
         this.adapter.addVariableEndBanner();
 
         const wkoHelmChartData = helmHelper.getOperatorHelmChartData();
@@ -207,6 +212,7 @@ define(['models/wkt-project', 'utils/script-generator-base', 'utils/helm-helper'
 
       _gatherHelmChartArgs() {
         return {
+          serviceAccount: this.adapter.getVariableReference('WKO_SERVICE_ACCOUNT'),
           domainNamespaceSelectionStrategy: this.adapter.getVariableReference('WKO_DOMAIN_NAMESPACE_SELECTION_STRATEGY'),
           domainNamespaceLabelSelector: this.adapter.getVariableReference('WKO_DOMAIN_NAMESPACE_LABEL_SELECTOR'),
           domainNamespaces: this.adapter.getVariableReference('WKO_DOMAIN_NAMESPACES'),
@@ -223,7 +229,8 @@ define(['models/wkt-project', 'utils/script-generator-base', 'utils/helm-helper'
           elasticSearchPort: this.adapter.getVariableReference('WKO_ELASTICSEARCH_PORT'),
           javaLoggingLevel: this.adapter.getVariableReference('WKO_JAVA_LOGGING_LEVEL'),
           javaLoggingFileSizeLimit: this.adapter.getVariableReference('WKO_JAVA_LOGGING_FILE_SIZE_LIMIT'),
-          javaLoggingFileCount: this.adapter.getVariableReference('WKO_JAVA_LOGGING_FILE_COUNT')
+          javaLoggingFileCount: this.adapter.getVariableReference('WKO_JAVA_LOGGING_FILE_COUNT'),
+          timeout: this.adapter.getVariableReference('HELM_TIMEOUT'),
         };
       }
 

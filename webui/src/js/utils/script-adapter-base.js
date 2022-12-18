@@ -1,6 +1,6 @@
 /**
  * @license
- * Copyright (c) 2021, Oracle and/or its affiliates.
+ * Copyright (c) 2021, 2022, Oracle and/or its affiliates.
  * Licensed under The Universal Permissive License (UPL), Version 1.0 as shown at https://oss.oracle.com/licenses/upl/
  */
 'use strict';
@@ -213,6 +213,17 @@ define([],
           alreadyInstalledMessage, notInstalledIsError, alreadyInstalledIsError), '');
       }
 
+      addVerrazzanoInstalledCheckBlock(comment, kubectlExe, vzInstallName, notInstalledMessage,
+        alreadyInstalledMessage, notInstalledIsError, alreadyInstalledIsError) {
+        const args = `get verrazzano ${vzInstallName}`;
+        this._lines.push(...this._formatInstallCheckBlock(comment, kubectlExe, args, notInstalledMessage,
+          alreadyInstalledMessage, notInstalledIsError, alreadyInstalledIsError), '');
+      }
+
+      addVerrazzanoProjectCreateBlock(comment, kubectlExe, createProject, vzProjectYaml, errorMessage) {
+        this.addVariableEqualValueKubectlApplyBlock(comment, createProject, 'true', kubectlExe, vzProjectYaml, errorMessage);
+      }
+
       addCreateNamespaceBlock(comment, kubectlExe, namespace, createErrorMessage, alreadyExistsMessage) {
         const getArgs = `get namespace ${namespace}`;
         const createArgs = `create namespace ${namespace}`;
@@ -289,6 +300,16 @@ define([],
         this._lines.push(...this._formatRunCommandBlock(comment, kubectlExe, args, errorMessage), '');
       }
 
+      addVerrazzanoPlatformOperatorRolloutBlock(comment, kubectlExe, errorMessage) {
+        const args = '-n verrazzano-install rollout status deployment/verrazzano-platform-operator';
+        this._lines.push(...this._formatRunCommandBlock(comment, kubectlExe, args, errorMessage), '');
+      }
+
+      addVerrazzanoInstallWaitBlock(comment, kubectlExe, vzInstallName, vzInstallTimeout, errorMessage) {
+        const args = `wait --timeout=${vzInstallTimeout} --for=condition=InstallComplete verrazzano/${vzInstallName}`;
+        this._lines.push(...this._formatRunCommandBlock(comment, kubectlExe, args, errorMessage), '');
+      }
+
       addAddHelmChartToRepoBlock(comment, helmExe, chartName, chartPath, addErrorMessage) {
         const args = `repo add ${chartName} ${chartPath} --force-update`;
         this._lines.push(...this._formatRunCommandBlock(comment, helmExe, args, addErrorMessage), '');
@@ -312,6 +333,10 @@ define([],
           'apiserver.enableValidationWebhook': voyagerApiEnableWebhook
         };
         this._lines.push(...this._formatVoyagerHelmChartArgsBlock(comment, 'HELM_CHART_ARGS', ingressType, options), '');
+      }
+
+      addIngressHelmChartTimeoutArgBlock(comment, timeoutArg) {
+        this.addHelmTimeoutCollectArgsBlock(comment, 'HELM_CHART_ARGS', timeoutArg);
       }
 
       addIngressHelmChartPullSecretArgBlock(comment, ingressType, useSecret, secretName) {
@@ -411,6 +436,11 @@ define([],
       }
 
       // eslint-disable-next-line no-unused-vars
+      addHelmTimeoutCollectArgsBlock(comment, collectVarName, timeoutVarRef) {
+        /* subclasses must implement. */
+      }
+
+      // eslint-disable-next-line no-unused-vars
       addNotEmptyCollectArgsBlock(collectVarName, varRef, valuePrefix) {
         /* subclasses must implement. */
       }
@@ -427,6 +457,16 @@ define([],
 
       // eslint-disable-next-line no-unused-vars
       addKubectlUseContextBlock(kubectlExe, kubeContext) {
+        /* subclasses must implement. */
+      }
+
+      // eslint-disable-next-line no-unused-vars
+      addNotEmptyVariableKubectlApplyBlock(comment, variableReference, kubectlExe, yamlFile, errorMessage, successMessage) {
+        /* subclasses must implement. */
+      }
+
+      // eslint-disable-next-line no-unused-vars
+      addVariableEqualValueKubectlApplyBlock(comment, variableReference, variableValue, kubectlExe, yamlFile, errorMessage, successMessage) {
         /* subclasses must implement. */
       }
 

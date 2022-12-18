@@ -1,3 +1,8 @@
+/**
+ * @license
+ * Copyright (c) 2021, 2022, Oracle and/or its affiliates.
+ * Licensed under the Universal Permissive License v 1.0 as shown at https://oss.oracle.com/licenses/upl.
+ */
 const path = require('path');
 const winston = require('winston');
 require('winston-daily-rotate-file');
@@ -284,7 +289,7 @@ function _getLogFileMaxFiles(fileLogConfig) {
 
 function _getMustacheVariables(text) {
   const mustacheVariables = [];
-  const mustacheRegex = /{{([a-zA-Z0-9\\_\\-\\.]+)}}/g;
+  const mustacheRegex = /{{([a-zA-Z0-9_.-]+)}}/g;
 
   if (text) {
     let match = mustacheRegex.exec(text);

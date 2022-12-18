@@ -26,12 +26,6 @@ function(WdtActionsBase, project, wktConsole, i18n, projectIo, dialogHelper, val
       const errPrefix = 'wdt-preparer';
       const shouldCloseBusyDialog = !options.skipBusyDialog;
 
-      if (this.project.settings.targetDomainLocation.value === 'pv') {
-        const errMessage = i18n.t('wdt-preparer-domain-in-pv-message');
-        await window.api.ipc.invoke('show-info-message', errTitle, errMessage);
-        return Promise.resolve(false);
-      }
-
       const validationObject = this.getValidationObject('flow-prepare-model-name');
       if (validationObject.hasValidationErrors()) {
         const validationErrorDialogConfig = validationObject.getValidationErrorDialogConfig(errTitle);
@@ -111,12 +105,7 @@ function(WdtActionsBase, project, wktConsole, i18n, projectIo, dialogHelper, val
         if (prepareResult.isSuccess) {
           // apply the results to the project object.
           this.project.wdtModel.setSpecifiedModelFiles(prepareResult.model);
-
-          // Currently, Verrazzano support is limited to Model and Image only, so skip this step.
-          //
-          if (this.project.settings.wdtTargetType.value === 'wko') {
-            this.project.k8sDomain.loadPrepareModelResults(prepareResult);
-          }
+          this.project.k8sDomain.loadPrepareModelResults(prepareResult);
 
           if (!options.skipCompleteDialog) {
             const title = i18n.t('wdt-preparer-prepare-complete-title');

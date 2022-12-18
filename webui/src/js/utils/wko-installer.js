@@ -106,9 +106,10 @@ function(WkoActionsBase, project, wktConsole, i18n, projectIo, dialogHelper, val
           }
         }
 
-        busyDialogMessage = i18n.t('wko-installer-create-sa-in-progress', {operatorNamespace: operatorNamespace});
-        dialogHelper.updateBusyDialog(busyDialogMessage, 7 / totalSteps);
         const operatorServiceAccount = this.project.wko.k8sServiceAccount.value;
+        busyDialogMessage = i18n.t('wko-installer-create-sa-in-progress',
+          { operatorServiceAccount: operatorServiceAccount, operatorNamespace: operatorNamespace });
+        dialogHelper.updateBusyDialog(busyDialogMessage, 7 / totalSteps);
         if (!options.skipCreateOperatorServiceAccount) {
           const status = await this.createOperatorServiceAccount(kubectlExe, kubectlOptions, operatorNamespace,
             operatorServiceAccount, errTitle, errPrefix);
@@ -136,11 +137,12 @@ function(WkoActionsBase, project, wktConsole, i18n, projectIo, dialogHelper, val
 
         busyDialogMessage = i18n.t('wko-installer-install-in-progress', {helmReleaseName: helmReleaseName});
         dialogHelper.updateBusyDialog(busyDialogMessage, 10 / totalSteps);
+        const operatorVersion = this.project.wko.versionTag.hasValue() ? this.project.wko.versionTag.value : undefined;
         const helmChartValues = this.getWkoHelmChartValues(operatorServiceAccount);
         wktLogger.debug('helmChartValues = %s', JSON.stringify(helmChartValues, null, 2));
 
         const installResults = await window.api.ipc.invoke('helm-install-wko', helmExe, helmReleaseName,
-          operatorNamespace, helmChartValues, helmOptions);
+          operatorVersion, operatorNamespace, helmChartValues, helmOptions, kubectlExe, kubectlOptions);
 
         dialogHelper.closeBusyDialog();
 
@@ -148,6 +150,7 @@ function(WkoActionsBase, project, wktConsole, i18n, projectIo, dialogHelper, val
           const title = i18n.t('wko-installer-install-complete-title');
           const message = i18n.t('wko-installer-install-complete-message',
             { operatorName: helmReleaseName, operatorNamespace: operatorNamespace });
+          this.project.wko.installedVersion.value = installResults.version;
           await window.api.ipc.invoke('show-info-message', title, message);
           return Promise.resolve(true);
         } else {
@@ -167,7 +170,7 @@ function(WkoActionsBase, project, wktConsole, i18n, projectIo, dialogHelper, val
 
     async checkOperatorIsInstalled(kubectlExe, kubectlOptions, helmReleaseName, operatorNamespace, errTitle, errPrefix) {
       try {
-        const isInstalledResults = await window.api.ipc.invoke('is-wko-installed', kubectlExe, helmReleaseName, operatorNamespace, kubectlOptions);
+        const isInstalledResults = await window.api.ipc.invoke('is-wko-installed', kubectlExe, operatorNamespace, kubectlOptions);
 
         if (isInstalledResults.isInstalled) {
           dialogHelper.closeBusyDialog();

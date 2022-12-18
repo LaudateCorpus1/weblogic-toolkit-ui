@@ -1,6 +1,6 @@
 /**
  * @license
- * Copyright (c) 2021, Oracle and/or its affiliates.
+ * Copyright (c) 2021, 2022, Oracle and/or its affiliates.
  * Licensed under The Universal Permissive License (UPL), Version 1.0 as shown at https://oss.oracle.com/licenses/upl/
  */
 define(['accUtils', 'knockout', 'models/wkt-project', 'utils/k8s-domain-script-generator',
@@ -15,7 +15,7 @@ function (accUtils, ko, project, K8sDomainScriptGenerator, K8sDomainConfigMapGen
     let subscriptions = [];
 
     this.connected = () => {
-      accUtils.announce('Image code view loaded.', 'assertive');
+      accUtils.announce('Domain code view loaded.', 'assertive');
 
       // update code text if project changes
       subscriptions.push(project.postOpen.subscribe(() => {
@@ -55,13 +55,14 @@ function (accUtils, ko, project, K8sDomainScriptGenerator, K8sDomainConfigMapGen
 
 
     this.isConfigMapDisabled = () => {
-      return this.project.k8sDomain.configMapIsEmpty();
+      return this.project.settings.targetDomainLocation.value !== 'mii';
     };
 
     this.subviews = [
       {id: 'script', name: this.labelMapper('script-title')},
       {id: 'domain', name: this.labelMapper('domain-resource-title')},
-      {id: 'configMap', name: this.labelMapper('configmap-resource-title'), disabled: this.project.k8sDomain.configMapIsEmpty()}
+      {id: 'configMap', name: this.labelMapper('configmap-resource-title'),
+        disabled: this.isConfigMapDisabled()}
     ];
 
     this.subviewsDP = new ArrayDataProvider(this.subviews, {keyAttributes: 'id'});
@@ -77,7 +78,6 @@ function (accUtils, ko, project, K8sDomainScriptGenerator, K8sDomainConfigMapGen
     this.configMapText = ko.observable();
 
     this.k8sConfigMapGenerator = new K8sDomainConfigMapGenerator();
-    this.k8sDomainResourceGenerator = new K8sDomainResourceGenerator();
 
     this.renderScript = (selectedSubview) => {
       switch (selectedSubview) {
@@ -103,11 +103,50 @@ function (accUtils, ko, project, K8sDomainScriptGenerator, K8sDomainConfigMapGen
       this.configMapText(this.k8sConfigMapGenerator.generate().join('\n'));
     };
 
+    this.getDomainResourceGenerator = () => {
+      if (this.project.wko.installedVersion.hasValue()) {
+        return new K8sDomainResourceGenerator(this.project.wko.installedVersion.value);
+      } else {
+        return new K8sDomainResourceGenerator();
+      }
+    };
+
     this.renderDomainResource = () => {
-      this.domainText(this.k8sDomainResourceGenerator.generate().join('\n'));
+      this.domainText(this.getDomainResourceGenerator().generate().join('\n'));
     };
 
     this.renderScript(this.selectedSubview());
+
+    this.downloadInstaller = () => {
+      const format = this.shellScriptType();
+      const generator = new K8sDomainScriptGenerator(format);
+      const lines = generator.generate();
+      const fileType = i18n.t('script-file-type-label', {
+        type: i18n.t('nav-domain'),
+        subType: i18n.t('domain-code-script-title')
+      });
+      const formatLabel = this.shellLabelMapper(format + '-label');
+
+      window.api.ipc.send('download-file', lines, fileType, format, formatLabel);
+    };
+
+    this.downloadComponentResource = () => {
+      const generator = this.getDomainResourceGenerator();
+      const lines = generator.generate();
+      const fileType = i18n.t('domain-code-domain-resource-title');
+      const formatLabel = this.shellLabelMapper('resource-file-format');
+
+      window.api.ipc.send('download-file', lines, fileType, 'yaml', formatLabel);
+    };
+
+    this.downloadConfigMap = () => {
+      const generator = this.k8sConfigMapGenerator;
+      const lines = generator.generate();
+      const fileType = i18n.t('domain-code-configmap-resource-title');
+      const formatLabel = this.shellLabelMapper('resource-file-format');
+
+      window.api.ipc.send('download-file', lines, fileType, 'yaml', formatLabel);
+    };
   }
 
   return DomainCodeViewModel;

@@ -18,7 +18,9 @@ define(['utils/observable-properties', 'utils/validation-helper'],
         this.k8sServiceAccount = props.createProperty('weblogic-operator-sa');
         this.k8sServiceAccount.addValidator(...validationHelper.getK8sNameValidators());
 
-        this.operatorImage = props.createProperty(window.api.ipc.invoke('get-latest-wko-image-name'));
+        this.versionTag = props.createProperty(window.api.ipc.invoke('get-latest-wko-version-number'));
+
+        this.operatorImage = props.createProperty('ghcr.io/oracle/weblogic-kubernetes-operator:${1}', this.versionTag.observable);
         const operatorImageValidators = validationHelper.getImageTagValidators();
         this.operatorImage.addValidator(...operatorImageValidators);
 
@@ -63,6 +65,14 @@ define(['utils/observable-properties', 'utils/validation-helper'],
         this.javaLoggingLevel = props.createProperty('INFO');
         this.javaLoggingFileSizeLimit = props.createProperty(20000000);
         this.javaLoggingFileCount = props.createProperty(10);
+
+        // Jet tables do not work if you allow changing the value used as the primary key so always add a uid...
+        //
+        this.nodeSelector = props.createListProperty(['uid', 'name', 'value']);
+
+        this.helmTimeoutMinutes = props.createProperty(5);
+
+        this.installedVersion = props.createProperty();
 
         // internal fields that should not be read or written to the project file.
         this.internal = {

@@ -33,10 +33,18 @@ const kubectlUtils = require('./js/kubectlUtils');
 const helmUtils = require('./js/helmUtils');
 const openSSLUtils = require('./js/openSSLUtils');
 const osUtils = require('./js/osUtils');
+const githubUtils = require('./js/githubUtils');
 const { initializeAutoUpdater, registerAutoUpdateListeners, installUpdates, getUpdateInformation } = require('./js/appUpdater');
+const { startWebLogicRemoteConsoleBackend, getDefaultDirectoryForOpenDialog, setWebLogicRemoteConsoleHomeAndStart,
+  getDefaultWebLogicRemoteConsoleHome, getWebLogicRemoteConsoleBackendPort } = require('./js/wlRemoteConsoleUtils');
+const { getVerrazzanoReleaseVersions, isVerrazzanoInstalled, installVerrazzanoPlatformOperator,
+  verifyVerrazzanoPlatformOperatorInstall, installVerrazzano, verifyVerrazzanoInstallStatus } = require('./js/vzInstaller');
+const { deployApplication, deployComponents, deployProject, getComponentNamesByNamespace, getSecretNamesByNamespace,
+  getVerrazzanoClusterNames, getDeploymentNamesFromAllNamespaces, undeployApplication, undeployComponents } = require('./js/vzUtils');
 
 const { getHttpsProxyUrl, getBypassProxyHosts } = require('./js/userSettings');
 const { sendToWindow } = require('./js/windowUtils');
+const {compareVersions} = require('./js/versionUtils');
 
 const WKT_CONSOLE_STDOUT_CHANNEL = 'show-console-out-line';
 const WKT_CONSOLE_STDERR_CHANNEL = 'show-console-err-line';
@@ -153,6 +161,8 @@ class Main {
           }
 
           createWindow(this._isJetDevMode, this._wktApp).then(win => {
+            startWebLogicRemoteConsoleBackend(win).then();
+
             if (filePath) {
               win.once('ready-to-show', () => {
                 this.openProjectFileInWindow(win, filePath);
@@ -206,6 +216,7 @@ class Main {
       this._logger.debug('Received window-is-ready for window %d', event.sender.getOwnerBrowserWindow().id);
       const currentWindow = event.sender.getOwnerBrowserWindow();
       currentWindow.isReady = true;
+
       project.sendProjectOpened(currentWindow).then(async () => {
         if (!this._startupDialogsShownAlready) {
           const startupInformation = {
@@ -220,18 +231,34 @@ class Main {
               }
 
               sendToWindow(currentWindow, 'show-startup-dialogs', startupInformation);
+              const port = getWebLogicRemoteConsoleBackendPort();
+              this._logger.debug('Sending Remote Console backend port %s to Window ID %s', port, currentWindow.id);
+              sendToWindow(currentWindow, 'set-wrc-backend-port', port);
             });
           }
 
           this._startupDialogsShownAlready = true;
+        } else {
+          const port = getWebLogicRemoteConsoleBackendPort();
+          this._logger.debug('Sending Remote Console backend port %s to Window ID %s', port, currentWindow.id);
+          sendToWindow(currentWindow, 'set-wrc-backend-port', port);
         }
       });
     });
 
-    ipcMain.on('open-project', async (event, projectFile) => {
+    ipcMain.on('open-project', async (event, projectFile, isDirty) => {
       try {
         const currentWindow = event.sender.getOwnerBrowserWindow();
-        await project.openProjectFile(currentWindow, projectFile);
+        await project.openProjectFile(currentWindow, projectFile, isDirty);
+      } catch (e) {
+        this._logger.error(e);
+      }
+    });
+
+    ipcMain.on('new-project', async (event, projectFile, isDirty) => {
+      try {
+        const currentWindow = event.sender.getOwnerBrowserWindow();
+        await project.initializeNewProject(currentWindow, projectFile, isDirty);
       } catch (e) {
         this._logger.error(e);
       }
@@ -260,6 +287,11 @@ class Main {
 
       currentWindow.skipDirtyCheck = true;
       await currentWindow.close();
+    });
+
+    ipcMain.on('download-file', (event, lines, fileType, fileFormat, fileFormatName) => {
+      const window = event.sender.getOwnerBrowserWindow();
+      return project.downloadFile(window, lines, fileType, fileFormat, fileFormatName);
     });
 
     // eslint-disable-next-line no-unused-vars
@@ -316,6 +348,10 @@ class Main {
 
     ipcMain.handle('is-dev-mode', () => {
       return this._wktMode.isDevelopmentMode();
+    });
+
+    ipcMain.handle('get-latest-wko-version-number', async () => {
+      return wktTools.getLatestWkoVersion();
     });
 
     ipcMain.handle('get-latest-wko-image-name', async () => {
@@ -457,6 +493,12 @@ class Main {
       return wdtArchive.getEntryTypes();
     });
 
+    // This is used by the Model Design View...
+    //
+    ipcMain.handle('get-archive-entry', async (event, archiveEntryType, options) => {
+      return wdtArchive.getArchiveEntry(event.sender.getOwnerBrowserWindow(), archiveEntryType, options);
+    });
+
     ipcMain.handle('choose-java-home', async (event, defaultPath) => {
       const title = i18n.t('dialog-chooseJavaHome');
       const defaultDir = await javaUtils.getSelectJavaHomeDefaultPath(defaultPath);
@@ -588,8 +630,8 @@ class Main {
     });
 
     ipcMain.handle('save-project',async (event, projectFile, projectContents,
-      externalFileContents) => {
-      return project.saveProject(event.sender.getOwnerBrowserWindow(), projectFile, projectContents, externalFileContents);
+      externalFileContents, isNewFile, displayElectronSideErrors = true) => {
+      return project.saveProject(event.sender.getOwnerBrowserWindow(), projectFile, projectContents, externalFileContents, isNewFile, displayElectronSideErrors);
     });
 
     ipcMain.handle('close-project', async (event, keepWindow) => {
@@ -726,8 +768,16 @@ class Main {
       return kubectlUtils.validateDomainExist(kubectlExe, kubectlOptions, domain, namespace);
     });
 
-    ipcMain.handle('is-wko-installed', async (event, kubectlExe, operatorName, operatorNamespace, kubectlOptions) => {
-      return kubectlUtils.isOperatorAlreadyInstalled(kubectlExe, operatorName, operatorNamespace, kubectlOptions);
+    ipcMain.handle('validate-vz-application-exist', async (event, kubectlExe, kubectlOptions, application, namespace) => {
+      return kubectlUtils.validateApplicationExist(kubectlExe, kubectlOptions, application, namespace);
+    });
+
+    ipcMain.handle('vz-get-application-status', async (event, kubectlExe, application, namespace, options) => {
+      return kubectlUtils.getApplicationStatus(kubectlExe, application, namespace, options);
+    });
+
+    ipcMain.handle('is-wko-installed', async (event, kubectlExe, operatorNamespace, kubectlOptions) => {
+      return kubectlUtils.isOperatorAlreadyInstalled(kubectlExe, operatorNamespace, kubectlOptions);
     });
 
     ipcMain.handle('k8s-create-namespace', async (event, kubectlExe, namespace, kubectlOptions) => {
@@ -758,8 +808,8 @@ class Main {
       return kubectlUtils.apply(kubectlExe, fileData, kubectlOptions);
     });
 
-    ipcMain.handle('k8s-label-namespace', async (event, kubectlExe, namespace, label, kubectlOptions) => {
-      return kubectlUtils.createNamespaceLabelIfNotExists(kubectlExe, namespace, label, kubectlOptions);
+    ipcMain.handle('k8s-label-namespace', async (event, kubectlExe, namespace, labels, kubectlOptions) => {
+      return kubectlUtils.createNamespaceLabelIfNotExists(kubectlExe, namespace, labels, kubectlOptions);
     });
 
     ipcMain.handle('k8s-delete-object', async (event, kubectlExe, namespace, object, kind, kubectlOptions) => {
@@ -771,16 +821,36 @@ class Main {
       return helmUtils.addOrUpdateWkoHelmChart(helmExe, helmOptions);
     });
 
-    ipcMain.handle('helm-install-wko', async (event, helmExe, helmReleaseName, operatorNamespace, helmChartValues, helmOptions) => {
-      return helmUtils.installWko(helmExe, helmReleaseName, operatorNamespace, helmChartValues, helmOptions);
+    ipcMain.handle('helm-install-wko',async (event, helmExe, helmReleaseName, operatorVersion,
+      operatorNamespace, helmChartValues, helmOptions, kubectlExe, kubectlOptions) => {
+      const results = await helmUtils.installWko(helmExe, helmReleaseName, operatorVersion, operatorNamespace, helmChartValues, helmOptions);
+      if (results.isSuccess) {
+        if (operatorVersion) {
+          results.version = operatorVersion;
+        } else {
+          const versionResults = await kubectlUtils.getOperatorVersion(kubectlExe, operatorNamespace, kubectlOptions);
+          if (versionResults.isSuccess) {
+            results.version = versionResults.version;
+          }
+        }
+      }
+      return Promise.resolve(results);
     });
 
     ipcMain.handle('helm-uninstall-wko', async (event, helmExe, helmReleaseName, operatorNamespace, helmOptions) => {
       return helmUtils.uninstallWko(helmExe, helmReleaseName, operatorNamespace, helmOptions);
     });
 
-    ipcMain.handle('helm-update-wko', async (event, helmExe, operatorName, operatorNamespace, helmChartValues, helmOptions) => {
-      return helmUtils.updateWko(helmExe, operatorName, operatorNamespace, helmChartValues, helmOptions);
+    ipcMain.handle('helm-update-wko', async (event, helmExe, operatorName, operatorVersion,
+      operatorNamespace, helmChartValues, helmOptions, kubectlExe = undefined, kubectlOptions = undefined) => {
+      const results = await helmUtils.updateWko(helmExe, operatorName, operatorVersion, operatorNamespace, helmChartValues, helmOptions);
+      if (kubectlExe && results.isSuccess) {
+        const versionResults = await kubectlUtils.getOperatorVersion(kubectlExe, operatorNamespace, kubectlOptions);
+        if (versionResults.isSuccess) {
+          results.version = versionResults.version;
+        }
+      }
+      return Promise.resolve(results);
     });
 
     ipcMain.handle('helm-list-all-namespaces', async (event, helmExe, helmOptions) => {
@@ -841,6 +911,10 @@ class Main {
       return kubectlUtils.getOperatorVersionFromDomainConfigMap(kubectlExe, domainNamespace, options);
     });
 
+    ipcMain.handle('k8s-get-operator-version', async (event, kubectlExe, operatorNamespace, options) => {
+      return kubectlUtils.getOperatorVersion(kubectlExe, operatorNamespace, options);
+    });
+
     ipcMain.handle('get-tls-keyfile', async (event) => {
       const title = i18n.t('dialog-tls-keyfile', {});
       return chooseFromFileSystem(event.sender.getOwnerBrowserWindow(), {
@@ -890,6 +964,140 @@ class Main {
     ipcMain.handle('exit-app', async () => {
       // called before any projects opened, no need for extra checks
       app.quit();
+    });
+
+    ipcMain.handle('get-wrc-home-directory', async (event) => {
+      const title = i18n.t('dialog-getWebLogicRemoteConsoleHome');
+      const properties = osUtils.isMac() ? [ 'openFile', 'dontAddToRecent' ] : [ 'openDirectory', 'dontAddToRecent' ];
+      return chooseFromFileSystem(event.sender.getOwnerBrowserWindow(), {
+        title: title,
+        defaultPath: getDefaultDirectoryForOpenDialog(),
+        message: title,
+        buttonLabel: i18n.t('button-select'),
+        properties: properties
+      });
+    });
+
+    ipcMain.handle('get-wrc-app-image', async (event) => {
+      const title = i18n.t('dialog-getWebLogicRemoteConsoleAppImage');
+      return chooseFromFileSystem(event.sender.getOwnerBrowserWindow(), {
+        title: title,
+        defaultPath: getDefaultDirectoryForOpenDialog(true),
+        message: title,
+        buttonLabel: i18n.t('button-select'),
+        properties: [ 'openFile', 'dontAddToRecent' ],
+        filters: [
+          { name: 'AppImage Files', extensions: ['AppImage'] }
+        ]
+      });
+    });
+
+    ipcMain.handle('wrc-set-home-and-start', async (event, wlRemoteConsoleHome) => {
+      return setWebLogicRemoteConsoleHomeAndStart(event.sender.getOwnerBrowserWindow(), wlRemoteConsoleHome);
+    });
+
+    // eslint-disable-next-line no-unused-vars
+    ipcMain.handle('wrc-get-home-default-value', async (event) => {
+      return getDefaultWebLogicRemoteConsoleHome();
+    });
+
+    // eslint-disable-next-line no-unused-vars
+    ipcMain.handle('get-wko-release-versions', async (event, minimumVersion = '3.3.0') => {
+      const ghApiWkoBaseUrl = 'https://api.github.com/repos/oracle/weblogic-kubernetes-operator';
+
+      return new Promise(resolve => {
+        githubUtils.getReleaseVersions('WebLogic Kubernetes Operator', ghApiWkoBaseUrl).then(results => {
+          const mappedResults = [];
+          results.forEach(result => {
+            const version = result.tag.slice(1);
+            // Filter out versions less than the minimum we want to support...
+            if (compareVersions(version, minimumVersion) >= 0) {
+              mappedResults.push({ ...result, version });
+            }
+          });
+          resolve(mappedResults);
+        });
+      });
+    });
+
+    // eslint-disable-next-line no-unused-vars
+    ipcMain.handle('get-verrazzano-release-versions', async (event, minimumVersion = undefined) => {
+      return getVerrazzanoReleaseVersions(minimumVersion);
+    });
+
+    // eslint-disable-next-line no-unused-vars
+    ipcMain.handle('is-verrazzano-installed', async(event, kubectlExe, kubectlOptions) => {
+      return isVerrazzanoInstalled(kubectlExe, kubectlOptions);
+    });
+
+    // eslint-disable-next-line no-unused-vars
+    ipcMain.handle('install-verrazzano-platform-operator', async(event, kubectlExe, kubectlOptions, vzOptions) => {
+      return installVerrazzanoPlatformOperator(kubectlExe, kubectlOptions, vzOptions);
+    });
+
+    // eslint-disable-next-line no-unused-vars
+    ipcMain.handle('verify-verrazzano-platform-operator-install', async (event, kubectlExe, kubectlOptions, vzOptions) => {
+      return verifyVerrazzanoPlatformOperatorInstall(kubectlExe, kubectlOptions, vzOptions);
+    });
+
+    // eslint-disable-next-line no-unused-vars
+    ipcMain.handle('install-verrazzano', async (event, kubectlExe, kubectlOptions, verrazzanoResource) => {
+      return installVerrazzano(kubectlExe, kubectlOptions, verrazzanoResource);
+    });
+
+    // eslint-disable-next-line no-unused-vars
+    ipcMain.handle('verify-verrazzano-install-status', async (event, kubectlExe, kubectlOptions, vzOptions) => {
+      return verifyVerrazzanoInstallStatus(kubectlExe, kubectlOptions, vzOptions);
+    });
+
+    // eslint-disable-next-line no-unused-vars
+    ipcMain.handle('deploy-verrazzano-components', async (event, kubectlExe, components, kubectlOptions) => {
+      return deployComponents(kubectlExe, components, kubectlOptions);
+    });
+
+    // eslint-disable-next-line no-unused-vars
+    ipcMain.handle('undeploy-verrazzano-components', async (event, kubectlExe, componentNames, namespace, kubectlOptions) => {
+      return undeployComponents(kubectlExe, componentNames, namespace, kubectlOptions);
+    });
+
+    // eslint-disable-next-line no-unused-vars
+    ipcMain.handle('get-verrazzano-component-names', async (event, kubectlExe, namespace, kubectlOptions) => {
+      return getComponentNamesByNamespace(kubectlExe, namespace, kubectlOptions);
+    });
+
+    // eslint-disable-next-line no-unused-vars
+    ipcMain.handle('get-verrazzano-secret-names', async (event, kubectlExe, namespace, kubectlOptions) => {
+      return getSecretNamesByNamespace(kubectlExe, namespace, kubectlOptions);
+    });
+
+    // eslint-disable-next-line no-unused-vars
+    ipcMain.handle('get-verrazzano-cluster-names', async (event, kubectlExe, kubectlOptions) => {
+      return getVerrazzanoClusterNames(kubectlExe, kubectlOptions);
+    });
+
+    // eslint-disable-next-line no-unused-vars
+    ipcMain.handle('get-verrazzano-deployment-names-all-namespaces', async (event, kubectlExe, kubectlOptions) => {
+      return getDeploymentNamesFromAllNamespaces(kubectlExe, kubectlOptions);
+    });
+
+    // eslint-disable-next-line no-unused-vars
+    ipcMain.handle('deploy-verrazzano-application', async (event, kubectlExe, application, kubectlOptions) => {
+      return deployApplication(kubectlExe, application, kubectlOptions);
+    });
+
+    // eslint-disable-next-line no-unused-vars
+    ipcMain.handle('undeploy-verrazzano-application', async (event, kubectlExe, isMultiClusterApplication, applicationName, namespace, kubectlOptions) => {
+      return undeployApplication(kubectlExe, isMultiClusterApplication, applicationName, namespace, kubectlOptions);
+    });
+
+    // eslint-disable-next-line no-unused-vars
+    ipcMain.handle('deploy-verrazzano-project', async (event, kubectlExe, project, kubectlOptions) => {
+      return deployProject(kubectlExe, project, kubectlOptions);
+    });
+
+    // eslint-disable-next-line no-unused-vars
+    ipcMain.handle('verify-verrazzano-components-exist',async (event, kubectlExe, componentNames, namespace, kubectlOptions) => {
+      return kubectlUtils.verifyVerrazzanoComponentsDeployed(kubectlExe, componentNames, namespace, kubectlOptions);
     });
   }
 

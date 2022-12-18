@@ -11,6 +11,7 @@ const { getErrorMessage } = require('./errorUtils');
 
 // eslint-disable-next-line no-unused-vars
 const userSettableFieldNames = [
+  'webLogicRemoteConsoleHome',
   'proxy',
   'logging',
   'skipQuickstartAtStartup',
@@ -31,6 +32,7 @@ let _userSettingsFileName;
 // Here is an example with every possible field specified:
 //
 // {
+//   "webLogicRemoteConsoleHome": "The path to the WebLogic Remote Console installation",
 //   "proxy": {
 //     "httpsProxyUrl": "The proxy to use for the application's all https outbound communication",
 //     "bypassProxyHosts: "The value to use to set the NO_PROXY environment variable for child processes"
@@ -69,24 +71,41 @@ function getUserSettingsForRemote() {
 
 function applyUserSettingsFromRemote(remoteUserSettingsJson) {
   const { getLogger } = require('./wktLogging');
-  const logger = getLogger();
+  const wktLogger = getLogger();
 
   let remoteUserSettingsObject = JSON.parse(remoteUserSettingsJson);
   verifyRemoteUserSettingsObject(remoteUserSettingsObject);
   const currentSettings = _getUserSettings();
   for (const privateField of appPrivateFieldNames) {
-    logger.debug(`privateField = ${privateField}`);
+    wktLogger.debug(`privateField = ${privateField}`);
     if (Object.prototype.hasOwnProperty.call(currentSettings, privateField)) {
-      logger.debug(`adding private field ${privateField} to new user settings object`);
+      wktLogger.debug(`adding private field ${privateField} to new user settings object`);
       remoteUserSettingsObject[privateField] = currentSettings[privateField];
     } else {
-      logger.debug(`currentSettings doesn't have private field ${privateField}`);
+      wktLogger.debug(`currentSettings doesn't have private field ${privateField}`);
     }
   }
-  logger.debug(`new user settings are: ${JSON.stringify(remoteUserSettingsObject)}`);
+
+  if (wktLogger.isDebugEnabled()) {
+    wktLogger.debug(`new user settings are: ${JSON.stringify(remoteUserSettingsObject)}`);
+  }
   _userSettingsObject = remoteUserSettingsObject;
   saveUserSettings();
-  logger.debug('user settings saved...restart the application to pick up logger settings changes');
+  wktLogger.debug('user settings saved...restart the application to pick up logger settings changes');
+}
+
+function getWebLogicRemoteConsoleHome() {
+  let wlRemoteConsoleHome;
+  const userSettingsObj = _getUserSettings();
+  if ('webLogicRemoteConsoleHome' in userSettingsObj) {
+    wlRemoteConsoleHome = userSettingsObj['webLogicRemoteConsoleHome'];
+  }
+  return wlRemoteConsoleHome;
+}
+
+function setWebLogicRemoteConsoleHome(wlRemoteConsoleHome) {
+  const settings = _getUserSettings();
+  settings['webLogicRemoteConsoleHome'] = wlRemoteConsoleHome;
 }
 
 function getHttpsProxyUrl() {
@@ -413,5 +432,7 @@ module.exports = {
   setWindowSize,
   getLoggingConfiguration,
   getUserSettingsForRemote,
-  saveUserSettings
+  saveUserSettings,
+  getWebLogicRemoteConsoleHome,
+  setWebLogicRemoteConsoleHome
 };

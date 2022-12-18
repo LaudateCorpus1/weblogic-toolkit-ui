@@ -121,8 +121,11 @@ async function uninstallIngressController(helmExe, ingressName, ingressNamespace
   });
 }
 
-async function installWko(helmExe, name, namespace, helmChartValues, helmOptions) {
+async function installWko(helmExe, name, version, namespace, helmChartValues, helmOptions) {
   const args = [ 'install', name, _wkoHelmChartName, '--namespace', namespace ];
+  if (version) {
+    args.push('--version', version);
+  }
   processHelmChartValues(args, helmChartValues);
   processHelmOptions(args, helmOptions);
   args.push('--wait');
@@ -130,8 +133,11 @@ async function installWko(helmExe, name, namespace, helmChartValues, helmOptions
   return _runHelmWko(helmExe, name, namespace, args, helmOptions, 'helm-install-wko-failed-error-message');
 }
 
-async function updateWko(helmExe, name, namespace, helmChartValues, helmOptions) {
+async function updateWko(helmExe, name, version, namespace, helmChartValues, helmOptions) {
   const args = [ 'upgrade', name, _wkoHelmChartName, '--namespace', namespace, '--reuse-values' ];
+  if (version) {
+    args.push('--version', version);
+  }
   processHelmChartValues(args, helmChartValues);
   processHelmOptions(args, helmOptions);
   args.push('--wait');
@@ -220,17 +226,33 @@ function getHelmEnv(httpsProxyUrl, bypassProxyHosts, helmOptions) {
     env['TEMP'] = process.env.TEMP;
     env['APPDATA'] = process.env.APPDATA;
   }
-  getLogger().debug('Returning Helm Environment: %s', JSON.stringify(env, null, 2));
+
+  const wktLogger = getLogger();
+  if (wktLogger.isDebugEnabled()) {
+    wktLogger.debug('Returning Helm Environment: %s', JSON.stringify(env, null, 2));
+  }
   return env;
 }
 
 function processHelmChartValues(args, helmChartValues) {
   if (helmChartValues) {
     for (const [propertyName, propertyValue] of Object.entries(helmChartValues)) {
-      if (propertyName === 'imagePullSecrets') {
-        args.push(...formatArrayOfObjectsSetArgument(propertyName, propertyValue));
-      } else {
-        args.push('--set', formatSetArgument(propertyName, propertyValue));
+      switch (propertyName) {
+        case 'imagePullSecrets':
+          args.push(...formatArrayOfObjectsSetArgument(propertyName, propertyValue));
+          break;
+
+        case 'nodeSelector':
+          args.push(...formatNodeSelectorSetArgument(propertyValue));
+          break;
+
+        case 'timeout':
+          args.push('--timeout', `${propertyValue}m`);
+          break;
+
+        default:
+          args.push('--set', formatSetArgument(propertyName, propertyValue));
+          break;
       }
     }
   }
@@ -262,6 +284,22 @@ function formatArrayOfObjectsSetArgument(name, objectArray) {
         result.push('--set', formatSetArgument(`${name}[${i}].${key}`, value, true));
       }
     }
+  }
+  return result;
+}
+
+function formatNodeSelectorSetArgument(nodeSelectorMap) {
+  const result = [];
+  for (const [key, value] of Object.entries(nodeSelectorMap)) {
+    result.push('--set', formatSetArgument(`nodeSelector.${_getQuotedInnerKey(key)}`, value, true));
+  }
+  return result;
+}
+
+function _getQuotedInnerKey(key) {
+  let result = key;
+  if (key.includes('.')) {
+    result = `${key.replaceAll('.', '\\.')}`;
   }
   return result;
 }

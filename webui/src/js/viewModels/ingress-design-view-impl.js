@@ -1,6 +1,6 @@
 /**
  * @license
- * Copyright (c) 2021, Oracle and/or its affiliates.
+ * Copyright (c) 2021, 2022, Oracle and/or its affiliates.
  * Licensed under The Universal Permissive License (UPL), Version 1.0 as shown at https://oss.oracle.com/licenses/upl/
  */
 
@@ -221,7 +221,6 @@ function(i18n, accUtils, ko, ArrayDataProvider, BufferingDataProvider, project, 
         await k8sHelper.getServicesDetailsForNamespace(kubectlExe, kubectlOptions, namespace, errTitle, errPrefix);
       if (results) {
         const servicesList = {};
-        console.log('results.items is a ' + typeof(results.items));
         for (const item of results.items) {
           servicesList[item.metadata.name] = { ports: item.spec.ports };
         }

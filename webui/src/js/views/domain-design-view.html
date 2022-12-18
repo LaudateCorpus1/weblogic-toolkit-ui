@@ -57,6 +57,14 @@
                         help.instruction="[[labelMapper('domain-type-help')]]">
       </oj-select-single>
     </oj-bind-if>
+    <oj-input-text label-hint="[[labelMapper('wko-installed-version-label')]]"
+                   value="{{project.wko.installedVersion.observable}}"
+                   help.instruction="[[labelMapper('wko-installed-version-help')]]">
+      <oj-button slot="end" display="icons" chroming="borderless" on-oj-action="[[getWkoInstalledVersion]]">
+        <span slot="endIcon" class="oj-ux-ico-select" role="img"></span>
+        <oj-bind-text value="[[labelMapper('wko-installed-version-tooltip')]]"></oj-bind-text>
+      </oj-button>
+    </oj-input-text>
   </oj-form-layout>
 </div>
 
@@ -133,6 +141,20 @@
                       help.instruction="[[labelMapper('image-pull-policy-help')]]">
     </oj-select-single>
   </oj-form-layout>
+
+  <oj-bind-if test="[[showPrimaryImageHomeFields]]">
+    <oj-form-layout max-columns="2" direction="row">
+      <oj-input-text label-hint="[[labelMapper('image-wdt-install-home-label')]]"
+                     value="{{project.k8sDomain.imageWDTInstallHome.observable}}"
+                     help.instruction="[[labelMapper('image-wdt-install-home-help')]]">
+      </oj-input-text>
+      <oj-input-text label-hint="[[labelMapper('image-model-home-label')]]"
+                     value="{{project.k8sDomain.imageModelHome.observable}}"
+                     help.instruction="[[labelMapper('image-model-home-help')]]">
+      </oj-input-text>
+    </oj-form-layout>
+  </oj-bind-if>
+
   <oj-form-layout max-columns="2" direction="row">
     <oj-switch label-hint="[[labelMapper('image-registry-pull-requires-authentication-label')]]"
                value="{{project.k8sDomain.imageRegistryPullRequireAuthentication.observable}}"
@@ -224,6 +246,20 @@
                           help.instruction="[[labelMapper('aux-image-pull-policy-help')]]">
         </oj-select-single>
       </oj-form-layout>
+
+      <oj-bind-if test="[[showAuxImageSourceFields]]">
+        <oj-form-layout max-columns="2" direction="row">
+          <oj-input-text label-hint="[[labelMapper('aux-image-source-wdt-home-label')]]"
+                         value="{{project.k8sDomain.auxImageSourceWDTInstallHome.observable}}"
+                         help.instruction="[[labelMapper('aux-image-source-wdt-home-help')]]">
+          </oj-input-text>
+          <oj-input-text label-hint="[[labelMapper('aux-image-source-model-home-label')]]"
+                         value="{{project.k8sDomain.auxImageSourceModelHome.observable}}"
+                         help.instruction="[[labelMapper('aux-image-source-model-home-help')]]">
+          </oj-input-text>
+        </oj-form-layout>
+      </oj-bind-if>
+
       <oj-form-layout max-columns="2" direction="row">
         <oj-switch label-hint="[[labelMapper('aux-image-registry-pull-requires-authentication-label')]]"
                    value="{{project.k8sDomain.auxImageRegistryPullRequireAuthentication.observable}}"
@@ -277,6 +313,7 @@
   </div>
   <oj-table id="clusters-table"
             class="wkt-domain-clusters-table"
+            :aria-label="[[labelMapper('clusters-table-aria-label')]]"
             data="[[clustersDP]]"
             display="grid"
             horizontal-grid-visible="enabled"
@@ -294,14 +331,32 @@
         <td>
           <oj-button display="icons" chroming="borderless" on-oj-action="[[handleEditCluster]]">
             <span slot="endIcon" class="oj-ux-ico-edit"></span>
-            <oj-bind-text value="[[labelMapper('edit-cluster-label')]]"></oj-bind-text>
+            <oj-bind-text value="[[labelMapper('edit-cluster-tooltip')]]"></oj-bind-text>
+          </oj-button>
+        </td>
+        <td>
+          <oj-button display="icons"
+                     chroming="borderless"
+                     disabled="[[isDomainInPV() === false]]"
+                     on-oj-action="[[handleDeleteCluster]]">
+            <span slot="endIcon" class="oj-ux-ico-trash"></span>
+            <oj-bind-text value="[[labelMapper('delete-cluster-tooltip')]]"></oj-bind-text>
           </oj-button>
         </td>
       </tr>
     </template>
-    <template slot="headerTemplate">
+    <template slot="chooseHeaderTemplate">
       <oj-button display="icons" chroming="borderless" disabled="true">
         <span slot="endIcon"></span>
+      </oj-button>
+    </template>
+    <template slot="headerTemplate" data-oj-as="header">
+      <oj-button display="icons"
+                 chroming="borderless"
+                 disabled="[[isDomainInPV() === false]]"
+                 on-oj-action="[[handleAddCluster]]">
+        <span slot="endIcon" class="oj-ux-ico-plus"></span>
+        <oj-bind-text value="[[labelMapper('add-cluster-tooltip')]]"></oj-bind-text>
       </oj-button>
     </template>
     <template slot="noData">
@@ -407,8 +462,8 @@
                            help.instruction="[[labelMapper('encryption-value-help')]]">
         </oj-input-password>
         <oj-button display="icons" chroming="borderless" on-oj-action="[[handleRegenerateEncryptionValue]]">
-          <oj-bind-text value="[[labelMapper('regenerate-encryption-value-label')]]"></oj-bind-text>
           <span slot='startIcon' class="oj-ux-ico-replay"></span>
+          <oj-bind-text value="[[labelMapper('regenerate-encryption-value-tooltip')]]"></oj-bind-text>
         </oj-button>
       </oj-form-layout>
     </div>
@@ -491,5 +546,52 @@
                     help.instruction="[[labelMapper('additional-java-options-help')]]">
       </oj-text-area>
     </oj-form-layout>
+  </div>
+
+  <div class="oj-panel">
+    <h6 class="wkt-subheading"><oj-bind-text value="[[labelMapper('domain-node-selector-title')]]"></oj-bind-text></h6>
+    <oj-table id="domain-node-selector-table"
+              class="wkt-domain-node-selectors-table"
+              :aria-label="[[labelMapper('domain-node-selector-table-aria-label')]]"
+              data="[[domainNodeSelectorDP]]"
+              display="grid"
+              layout="fixed"
+              horizontal-grid-visible="enabled"
+              vertical-grid-visible="enabled"
+              edit-mode="rowEdit"
+              columns='[[nodeSelectorColumnMetadata]]'>
+      <template slot="rowTemplate" data-oj-as="row">
+        <tr>
+          <oj-bind-if test='[[row.mode=="navigation"]]'>
+            <td>
+              <oj-bind-text value="[[row.data.name]]"></oj-bind-text>
+            </td>
+            <td>
+              <oj-bind-text value="[[row.data.value]]"></oj-bind-text>
+            </td>
+          </oj-bind-if>
+          <oj-bind-if test='[[row.mode=="edit"]]'>
+            <td>
+              <oj-input-text value="{{row.data.name}}" class="editable"></oj-input-text>
+            </td>
+            <td>
+              <oj-input-text value="{{row.data.value}}" class="editable"></oj-input-text>
+            </td>
+          </oj-bind-if>
+          <td>
+            <oj-button display="icons" chroming="borderless" on-oj-action="[[row.data.remove]]">
+              <span slot="endIcon" class="oj-ux-ico-trash"></span>
+              <oj-bind-text value="[[labelMapper('domain-node-selector-delete-row-tooltip')]]"></oj-bind-text>
+            </oj-button>
+          </td>
+        </tr>
+      </template>
+      <template slot="headerTemplate" data-oj-as="header">
+        <oj-button display="icons" chroming="borderless" on-oj-action="[[handleAddDomainNodeSelector]]">
+          <span slot="endIcon" class="oj-ux-ico-plus"></span>
+          <oj-bind-text value="[[labelMapper('domain-node-selector-add-row-tooltip')]]"></oj-bind-text>
+        </oj-button>
+      </template>
+    </oj-table>
   </div>
 </oj-collapsible>

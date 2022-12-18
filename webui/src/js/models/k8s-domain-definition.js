@@ -46,6 +46,13 @@ define(['knockout', 'utils/observable-properties', 'utils/common-utilities', 'ut
 
         this.imagePullPolicy = props.createProperty('IfNotPresent');
 
+        // These fields are exposed to the user only when using an existing Primary Image and
+        // not using an Auxiliary Image at all.
+        //
+        this.imageModelHome = props.createProperty('/u01/wdt/models');
+        this.imageWDTInstallHome = props.createProperty('/u01/wdt/weblogic-deploy');
+
+
         // Auxiliary image-related properties
         this.auxImageRegistryPullRequireAuthentication = props.createProperty(false);
         this.auxImageRegistryUseExistingPullSecret = props.createProperty(true);
@@ -57,11 +64,16 @@ define(['knockout', 'utils/observable-properties', 'utils/common-utilities', 'ut
         this.auxImageRegistryPullEmail.addValidator(...validationHelper.getEmailAddressValidators());
         this.auxImagePullPolicy = props.createProperty('IfNotPresent');
 
+        // These fields are exposed to the user only when using an existing Auxiliary Image.
+        //
+        this.auxImageSourceModelHome = props.createProperty('/auxiliary/models');
+        this.auxImageSourceWDTInstallHome = props.createProperty('/auxiliary/weblogic-deploy');
+
         this.clusterKeys = [
-          'name', 'maxServers', 'replicas', 'minHeap', 'maxHeap', 'cpuRequest', 'cpuLimit', 'memoryRequest',
+          'uid', 'name', 'maxServers', 'replicas', 'minHeap', 'maxHeap', 'cpuRequest', 'cpuLimit', 'memoryRequest',
           'memoryLimit', 'disableDebugStdout', 'disableFan', 'useUrandom', 'additionalArguments'
         ];
-        this.clusters = props.createListProperty(this.clusterKeys).persistByKey('name');
+        this.clusters = props.createListProperty(this.clusterKeys).persistByKey('uid');
 
         this.modelConfigMapName = props.createProperty('${1}-config-map', this.uid.observable);
         this.modelConfigMapName.addValidator(...validationHelper.getK8sNameValidators());
@@ -96,6 +108,10 @@ define(['knockout', 'utils/observable-properties', 'utils/common-utilities', 'ut
         this.memoryLimit = props.createProperty();
         this.memoryLimit.addValidator(...validationHelper.getK8sMemoryValidators());
 
+        // Jet tables do not work if you allow changing the value used as the primary key so always add a uid...
+        //
+        this.domainNodeSelector = props.createListProperty(['uid', 'name', 'value']);
+
         // update the secrets list when the uid changes.
         this.uid.observable.subscribe(() => {
           this.updateSecrets();
@@ -106,17 +122,6 @@ define(['knockout', 'utils/observable-properties', 'utils/common-utilities', 'ut
           wktLogger.debug('modelContentChanged event calling updateSecrets()');
           this.updateSecrets();
         });
-
-        this.configMapIsEmpty = () => {
-          let result = true;
-          for (const entry of wdtModel.getMergedPropertiesContent().observable()) {
-            if (entry.Override) {
-              result = false;
-              break;
-            }
-          }
-          return result;
-        };
 
         this.readFrom = (json) => {
           props.createGroup(name, this).readFrom(json);
@@ -193,6 +198,7 @@ define(['knockout', 'utils/observable-properties', 'utils/common-utilities', 'ut
         };
 
         this.loadPrepareModelResults = (prepareModelResults) => {
+          wktLogger.debug('loadPrepareModelResults received: %s', JSON.stringify(prepareModelResults, null, 2));
           this.handlePrepareModelTopology(prepareModelResults.domain);
           this.handlePrepareModelSecrets(prepareModelResults.secrets);
         };
@@ -204,19 +210,22 @@ define(['knockout', 'utils/observable-properties', 'utils/common-utilities', 'ut
         };
 
         this.setClusterRow = (prepareModelCluster) => {
-          let found;
+          let cluster;
           for (const row of this.clusters.observable()) {
             if (row.name === prepareModelCluster.clusterName) {
               row.maxServers = prepareModelCluster.replicas;
               if (row.replicas === undefined || row.replicas > row.maxServers) {
                 row.replicas = row.maxServers;
               }
-              found = true;
+              cluster = row;
               break;
             }
           }
-          if (!found) {
+          if (cluster) {
+            this.clusters.observable.replace(cluster, cluster);
+          } else {
             this.clusters.addNewItem({
+              uid: utils.getShortUuid(),
               name: prepareModelCluster.clusterName,
               maxServers: prepareModelCluster.replicas,
               replicas: prepareModelCluster.replicas
@@ -225,9 +234,9 @@ define(['knockout', 'utils/observable-properties', 'utils/common-utilities', 'ut
         };
 
         this.handlePrepareModelSecrets = (secrets) => {
-          if (secrets && secrets.secrets && secrets.secrets.length) {
-            wktLogger.debug('handlePrepareModelSecrets() working on %d secrets', secrets.secrets.length);
-            for (const secret of secrets.secrets) {
+          if (secrets && secrets.length) {
+            wktLogger.debug('handlePrepareModelSecrets() working on %d secrets', secrets.length);
+            for (const secret of secrets) {
               wktLogger.debug('working on secret %s', secret.name);
 
               // The secret should always exist already because prepare model updated the model first,

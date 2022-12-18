@@ -5,11 +5,11 @@
  */
 define(['models/wkt-project', 'accUtils', 'utils/common-utilities', 'knockout', 'utils/i18n', 'utils/screen-utils',
   'ojs/ojbufferingdataprovider', 'ojs/ojarraydataprovider', 'ojs/ojconverter-number', 'utils/dialog-helper',
-  'utils/view-helper', 'utils/wkt-logger', 'ojs/ojmessaging', 'ojs/ojinputtext', 'ojs/ojlabel', 'ojs/ojbutton',
-  'ojs/ojformlayout', 'ojs/ojcollapsible', 'ojs/ojselectsingle', 'ojs/ojlistview', 'ojs/ojtable', 'ojs/ojswitch',
-  'ojs/ojinputnumber', 'ojs/ojradioset'],
+  'utils/view-helper', 'utils/wko-get-installed-version', 'utils/wkt-logger', 'ojs/ojmessaging', 'ojs/ojinputtext',
+  'ojs/ojlabel', 'ojs/ojbutton', 'ojs/ojformlayout', 'ojs/ojcollapsible', 'ojs/ojselectsingle', 'ojs/ojlistview',
+  'ojs/ojtable', 'ojs/ojswitch', 'ojs/ojinputnumber', 'ojs/ojradioset'],
 function (project, accUtils, utils, ko, i18n, screenUtils, BufferingDataProvider, ArrayDataProvider,
-  ojConverterNumber, dialogHelper, viewHelper) {
+  ojConverterNumber, dialogHelper, viewHelper, wkoInstalledVersionChecker) {
   function DomainDesignViewModel() {
 
     let subscriptions = [];
@@ -69,6 +69,10 @@ function (project, accUtils, utils, ko, i18n, screenUtils, BufferingDataProvider
     this.project = project;
     this.i18n = i18n;
 
+    this.getWkoInstalledVersion = () => {
+      wkoInstalledVersionChecker.startOperatorInstallVersionCheck().then();
+    };
+
     this.mainCreateImageSwitchHelp = ko.computed(() => {
       if (this.project.image.useAuxImage.value) {
         return this.imageLabelMapper('create-image-aux-help');
@@ -125,12 +129,24 @@ function (project, accUtils, utils, ko, i18n, screenUtils, BufferingDataProvider
       return this.labelMapper(key);
     }, this);
 
+    this.showPrimaryImageHomeFields = ko.computed(() => {
+      return this.project.settings.targetDomainLocation.observable() === 'mii' &&
+        !this.project.image.createPrimaryImage.observable() &&
+        !this.project.image.useAuxImage.observable();
+    }, this);
+
     this.isPrimaryImageTagReadOnly = ko.computed(() => {
       return this.project.image.createPrimaryImage.observable();
     }, this);
 
     this.isAuxImageTagReadOnly = ko.computed(() => {
       return this.project.image.createAuxImage.observable();
+    }, this);
+
+    this.showAuxImageSourceFields = ko.computed(() => {
+      return this.project.settings.targetDomainLocation.observable() === 'mii' &&
+        this.project.image.useAuxImage.observable() &&
+        !this.project.image.createAuxImage.observable();
     }, this);
 
     this.auxImageTagHelp = ko.computed(() => {
@@ -270,6 +286,14 @@ function (project, accUtils, utils, ko, i18n, screenUtils, BufferingDataProvider
       {
         'className': 'wkt-table-delete-cell',
         'headerClassName': 'wkt-table-add-header',
+        'headerTemplate': 'chooseHeaderTemplate',
+        'template': 'actionTemplate',
+        'sortable': 'disable',
+        width: viewHelper.BUTTON_COLUMN_WIDTH
+      },
+      {
+        'className': 'wkt-table-delete-cell',
+        'headerClassName': 'wkt-table-add-header',
         'headerTemplate': 'headerTemplate',
         'template': 'actionTemplate',
         'sortable': 'disable',
@@ -287,7 +311,10 @@ function (project, accUtils, utils, ko, i18n, screenUtils, BufferingDataProvider
     this.handleEditCluster = (event, context) => {
       const index = context.item.index;
       const cluster = this.project.k8sDomain.clusters.observable()[index];
-      const options = { cluster: cluster };
+      const existingClusterNames = this.project.k8sDomain.clusters.observable()
+        .filter(item => item.name !== cluster.name).map(item => { return item.name; });
+
+      const options = { cluster: cluster, existingNames: existingClusterNames, isDomainInPV: this.isDomainInPV() };
 
       dialogHelper.promptDialog('cluster-edit-dialog', options).then(result => {
         if (result) {
@@ -299,6 +326,7 @@ function (project, accUtils, utils, ko, i18n, screenUtils, BufferingDataProvider
             }
           });
           if (changed) {
+            // FIXME - deal with cluster name changes that conflict with existing names...
             this.project.k8sDomain.clusters.observable.replace(cluster, cluster);
           }
         }
@@ -310,6 +338,40 @@ function (project, accUtils, utils, ko, i18n, screenUtils, BufferingDataProvider
       this.clustersEditRow({ rowKey: null });
     };
 
+    const generatedClusterNameRegex = /^new-cluster-(\d+)$/;
+
+    this.generateNewClusterName = () => {
+      let index = 1;
+      this.project.k8sDomain.clusters.observable().forEach(cluster => {
+        const match = cluster.name.match(generatedClusterNameRegex);
+        if (match) {
+          const indexFound = Number(match[1]);
+          if (indexFound >= index) {
+            index = indexFound + 1;
+          }
+        }
+      });
+      return `new-cluster-${index}`;
+    };
+
+    this.handleAddCluster = () => {
+      const clusterToAdd = {
+        uid: utils.getShortUuid(),
+        name: this.generateNewClusterName(),
+        // In the case of Domain in PV where the user is adding a cluster definition
+        // without running PrepareModel, we have no information on the cluster size
+        // so just set replicas to zero and maxServers to the max value possible.
+        //
+        replicas: 0,
+        maxServers: Number.MAX_SAFE_INTEGER
+      };
+      this.project.k8sDomain.clusters.addNewItem(clusterToAdd);
+    };
+
+    this.handleDeleteCluster = (event, context) => {
+      const index = context.item.index;
+      this.project.k8sDomain.clusters.observable.splice(index, 1);
+    };
 
     this.modelHasNoProperties = () => {
       return this.project.wdtModel.getMergedPropertiesContent().value.length === 0;
@@ -340,14 +402,54 @@ function (project, accUtils, utils, ko, i18n, screenUtils, BufferingDataProvider
 
     this.secretsTableColumnMetadata = () => {
       return [
-        {'headerText': this.labelMapper('secretname-header'), 'sortProperty': 'name', 'resizable': 'enabled'},
-        {'headerText': this.labelMapper('username-header'), 'sortable': 'disabled', 'resizable': 'enabled'},
-        {'headerText': this.labelMapper('password-header'), 'sortable': 'disabled', 'resizable': 'enabled'},
+        { headerText: this.labelMapper('secretname-header'), sortProperty: 'name', resizable: 'enabled' },
+        { headerText: this.labelMapper('username-header'), sortable: 'disabled', resizable: 'enabled' },
+        { headerText: this.labelMapper('password-header'), sortable: 'disabled', resizable: 'enabled' },
       ];
     };
 
     this.secretsDP = new BufferingDataProvider(new ArrayDataProvider(
       this.project.k8sDomain.secrets.observable, {keyAttributes: 'name'}));
+
+    this.nodeSelectorColumnMetadata = [
+      {
+        headerText: this.labelMapper('domain-node-selector-label-name-header'),
+        sortProperty: 'name'
+      },
+      {
+        headerText: this.labelMapper('domain-node-selector-label-value-header'),
+        sortable: 'disabled'
+      },
+      {
+        'className': 'wkt-table-delete-cell',
+        'headerClassName': 'wkt-table-add-header',
+        'headerTemplate': 'headerTemplate',
+        'template': 'actionTemplate',
+        'sortable': 'disable',
+        width: viewHelper.BUTTON_COLUMN_WIDTH
+      },
+    ];
+
+    this.domainNodeSelectorDP = new BufferingDataProvider(
+      new ArrayDataProvider(this.project.k8sDomain.domainNodeSelector.observable, { keyAttributes: 'uid' }));
+
+    this.handleAddDomainNodeSelector = () => {
+      const labelNames = [];
+      this.project.k8sDomain.domainNodeSelector.observable().forEach(label => {
+        labelNames.push(label.name);
+      });
+
+      let nextIndex = 0;
+      while (labelNames.indexOf(`new-label-${nextIndex + 1}`) !== -1) {
+        nextIndex++;
+      }
+
+      this.project.k8sDomain.domainNodeSelector.addNewItem({
+        uid: utils.getShortUuid(),
+        name: `new-label-${nextIndex + 1}`,
+        value: ''
+      });
+    };
   }
 
   return DomainDesignViewModel;

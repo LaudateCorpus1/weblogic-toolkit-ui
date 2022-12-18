@@ -16,6 +16,9 @@ const { getErrorMessage } = require('./errorUtils');
 const osUtils = require('./osUtils');
 const k8sUtils = require('./k8sUtils');
 
+const VZ_NOT_INSTALLED_ERROR_MESSAGE = 'the server doesn\'t have a resource type "Verrazzano"';
+const VZ_OPERATOR_SUCCESS_MESSAGE = 'deployment "verrazzano-platform-operator" successfully rolled out';
+
 /* global process */
 async function validateKubectlExe(kubectlExe) {
   const results = {
@@ -153,6 +156,14 @@ async function getWkoDomainStatus(kubectlExe, domainUID, domainNamespace, option
   });
 }
 
+// Currently, this call returns the status of the domain component with domainUID, similar to getWkoDomainStatus.
+// In future releases, there may be additional information about the application and other components.
+async function getApplicationStatus(kubectlExe, application, domainUID, namespace, options) {
+  const results = await getWkoDomainStatus(kubectlExe, domainUID, namespace, options);
+  results['application'] = application;
+  return results;
+}
+
 async function getOperatorStatus(kubectlExe, operatorNamespace, options) {
   const args = [ 'get', 'pods', '-n', operatorNamespace, '-o', 'json'];
   const httpsProxyUrl = getHttpsProxyUrl();
@@ -193,6 +204,28 @@ async function getOperatorLogs(kubectlExe, operatorNamespace, options) {
       results.isSuccess = false;
       results.reason =
         i18n.t('kubectl-get-operator-logs-error-message', { error: getErrorMessage(err) });
+      resolve(results);
+    });
+  });
+}
+
+async function getOperatorVersion(kubectlExe, operatorNamespace, options) {
+  const results = {
+    isSuccess: true
+  };
+
+  return new Promise(resolve => {
+    getOperatorLogs(kubectlExe, operatorNamespace, options).then(logResult => {
+      if (logResult.isSuccess === false) {
+        results.isSuccess = false;
+        results.reason = i18n.t('kubectl-get-operator-version-error-message', {error: logResult.reason});
+        return resolve(results);
+      }
+      _getOperatorVersionFromLogs(logResult.operatorLogs, results);
+      resolve(results);
+    }).catch(err => {
+      results.isSuccess = false;
+      results.reason = i18n.t('kubectl-get-operator-version-error-message', {error: getErrorMessage(err)});
       resolve(results);
     });
   });
@@ -309,7 +342,33 @@ async function validateDomainExist(kubectlExe, options, domain, namespace) {
   return Promise.resolve(result);
 }
 
-async function isOperatorAlreadyInstalled(kubectlExe, operatorName, operatorNamespace, options) {
+async function validateApplicationExist(kubectlExe, options, application, namespace) {
+  const httpsProxyUrl = getHttpsProxyUrl();
+  const bypassProxyHosts = getBypassProxyHosts();
+  const env = getKubectlEnvironment(options, httpsProxyUrl, bypassProxyHosts);
+
+  const result = {
+    isSuccess: true,
+    isValid: true,
+  };
+
+  const args = [ 'get', 'appconfig', application, '-n', namespace ];
+
+  try {
+    await executeFileCommand(kubectlExe, args, env);
+  } catch (err) {
+    if (isNotFoundError(err)) {
+      result.isValid = false;
+    } else {
+      result.isSuccess = false;
+      result.reason = getErrorMessage(err);
+      return Promise.resolve(result);
+    }
+  }
+  return Promise.resolve(result);
+}
+
+async function isOperatorAlreadyInstalled(kubectlExe, operatorNamespace, options) {
   // We are currently using kubectl to see if the operator deployment exists.  The operator deployment
   // name is always weblogic-operator...
   //
@@ -429,10 +488,10 @@ async function deleteObjectIfExists(kubectlExe, namespace, object, kind, options
   });
 }
 
-async function createNamespaceLabelIfNotExists(kubectlExe, namespace, label, options) {
+async function createNamespaceLabelIfNotExists(kubectlExe, namespace, labels, options) {
   const getArgs = [ 'get', 'namespace', namespace, '--output=json' ];
-  // overwrite is needed since our detection of the label existing only returns true if both the key and value matches.
-  const createArgs = [ 'label', '--overwrite', 'namespace', namespace, label ];
+  // overwrite is needed since our detection of the labels existing only returns true if both the key and value matches.
+  const createArgs = [ 'label', '--overwrite', 'namespace', namespace ];
   const httpsProxyUrl = getHttpsProxyUrl();
   const bypassProxyHosts = getBypassProxyHosts();
 
@@ -443,20 +502,23 @@ async function createNamespaceLabelIfNotExists(kubectlExe, namespace, label, opt
 
   return new Promise(resolve => {
     executeFileCommand(kubectlExe, getArgs, env).then(namespaceJson => {
-      if (doesLabelExist(namespaceJson, label)) {
+      const labelsToWrite = getLabelsToWrite(namespaceJson, labels);
+      if (labelsToWrite.length > 0) {
+        createArgs.push(...labelsToWrite);
+      } else {
         return resolve(results);
       }
 
       executeFileCommand(kubectlExe, createArgs, env).then(() => resolve(results)).catch(err => {
         results.isSuccess = false;
         results.reason = i18n.t('kubectl-label-ns-failed-error-message',
-          { namespace: namespace, label: label, error: getErrorMessage(err) });
+          { namespace: namespace, labels: JSON.stringify(labels), error: getErrorMessage(err) });
         resolve(results);
       });
     }).catch(err => {
       results.isSuccess = false;
       results.reason = i18n.t('kubectl-label-get-ns-failed-error-message',
-        { namespace: namespace, label: label, error: getErrorMessage(err) });
+        { namespace: namespace, label: JSON.stringify(labels), error: getErrorMessage(err) });
       resolve(results);
     });
   });
@@ -589,6 +651,29 @@ async function getIngresses(kubectlExe, namespace, serviceType, options) {
   });
 }
 
+async function applyUsingUrl(kubectlExe, dataUrl, options) {
+  const httpsProxyUrl = getHttpsProxyUrl();
+  const bypassProxyHosts = getBypassProxyHosts();
+
+  const env = getKubectlEnvironment(options, httpsProxyUrl, bypassProxyHosts);
+
+  const result = {
+    isSuccess: true
+  };
+
+  return new Promise(resolve => {
+    const args = [ 'apply', '-f', dataUrl ];
+    executeFileCommand(kubectlExe, args, env).then(stdout => {
+      result.message = stdout;
+      resolve(result);
+    }).catch(err => {
+      result.isSuccess = false;
+      result.reason = i18n.t('kubectl-apply-url-failed-error-message', { url: dataUrl, error: getErrorMessage(err) });
+      resolve(result);
+    });
+  });
+}
+
 async function apply(kubectlExe, fileData, options) {
   const httpsProxyUrl = getHttpsProxyUrl();
   const bypassProxyHosts = getBypassProxyHosts();
@@ -603,7 +688,7 @@ async function apply(kubectlExe, fileData, options) {
     fsUtils.writeTempFile(fileData, { baseName: 'k8sApplyData', extension: '.yaml' }).then(fileName => {
       const args = [ 'apply', '-f', fileName ];
       executeFileCommand(kubectlExe, args, env).then(stdout => {
-        console.log('kubectl apply returned: %s', stdout);
+        getLogger().debug('kubectl apply returned: %s', stdout);
         fsUtils.recursivelyRemoveTemporaryFileDirectory(fileName).then(() => resolve(result)).catch(err => {
           getLogger().warn('kubectlUtils.apply() failed to remove temporary file %s: %s', fileName, err);
           resolve(result);
@@ -706,24 +791,17 @@ function doesNamedObjectExist(objectListJson, name) {
   return result;
 }
 
-// The only case we care about is if the label and its value match since we are overwriting labels.
-function doesLabelExist(objectJson, newLabel) {
-  let result = false;
-  if (objectJson) {
-    const object = JSON.parse(objectJson);
-    if (object.metadata && object.metadata.labels) {
-      const newComps = newLabel.split('=');
-      const newKey = newComps[0];
-      let newValue;
-      if (newComps.length > 1) {
-        newValue = newComps[1];
-      }
-      const labels = object.metadata.labels;
-      for (const [key, value] of Object.entries(labels)) {
-        if (key === newKey && value === newValue) {
-          result = true;
-          break;
-        }
+function getLabelsToWrite(objectJson, newLabels) {
+  const result = [];
+  if (newLabels.length > 0) {
+    const existingLabels = objectJson ? (JSON.parse(objectJson).metadata?.labels || {}) : {};
+    for (const newLabel of newLabels) {
+      const newLabelComps = newLabel.split('=', 2);
+      const newKey = newLabelComps[0];
+      const newValue = newLabelComps.length > 1 ? newLabelComps[1] : undefined;
+
+      if (!(Object.hasOwnProperty.call(existingLabels, newKey) && existingLabels[newKey] === newValue)) {
+        result.push(newLabel);
       }
     }
   }
@@ -750,7 +828,7 @@ async function createOrReplaceSecret(kubectlExe, namespace, secret, createArgs, 
           doCreateSecret(kubectlExe, createArgs, env, namespace, secret, resolve, results, createErrorTemplateKey);
         }).catch(err => {
           results.isSuccess = false;
-          results.reason = i18n.t(errorKeys.delete,{ namespace: namespace, secret: secret, error: getErrorMessage(err) });
+          results.reason = i18n.t(errorKeys.delete, { namespace: namespace, secret: secret, error: getErrorMessage(err) });
           resolve(results);
         });
       } else {
@@ -758,22 +836,186 @@ async function createOrReplaceSecret(kubectlExe, namespace, secret, createArgs, 
       }
     }).catch(err => {
       results.isSuccess = false;
-      results.reason = i18n.t(errorKeys.get,{ namespace: namespace, secret: secret, error: getErrorMessage(err) });
+      results.reason = i18n.t(errorKeys.get, { namespace: namespace, secret: secret, error: getErrorMessage(err) });
       resolve(results);
     });
   });
 }
 
+async function isVerrazzanoInstalled(kubectlExe, options) {
+  const getArgs = [ 'get', 'Verrazzano', '--output=json' ];
+  const httpsProxyUrl = getHttpsProxyUrl();
+  const bypassProxyHosts = getBypassProxyHosts();
+
+  const env = getKubectlEnvironment(options, httpsProxyUrl, bypassProxyHosts);
+
+  const result = {
+    isInstalled: false
+  };
+
+  return new Promise(resolve => {
+    executeFileCommand(kubectlExe, getArgs, env).then(vzJson => {
+      const vzObjectList = JSON.parse(vzJson).items;
+      if (vzObjectList.length > 0) {
+        const vzObject = vzObjectList[0];
+        result.isInstalled = true;
+        result.name = vzObject.metadata?.name;
+
+        let statusVersion = vzObject.status?.version;
+        if (statusVersion && statusVersion.startsWith('v')) {
+          statusVersion = statusVersion.slice(1);
+        }
+        result.version = statusVersion;
+      }
+      resolve(result);
+    }).catch(err => {
+      const error = getErrorMessage(err);
+      if (! error.includes(VZ_NOT_INSTALLED_ERROR_MESSAGE)) {
+        result.reason = i18n.t('kubectl-get-vz-install-failed-error-message', { error });
+      }
+      resolve(result);
+    });
+  });
+}
+
+async function verifyVerrazzanoPlatformOperatorRollout(kubectlExe, options) {
+  const httpsProxyUrl = getHttpsProxyUrl();
+  const bypassProxyHosts = getBypassProxyHosts();
+
+  const env = getKubectlEnvironment(options, httpsProxyUrl, bypassProxyHosts);
+
+  const result = {
+    isSuccess: true
+  };
+
+  return new Promise(resolve => {
+    const args = [ 'rollout', 'status', 'deployment/verrazzano-platform-operator', '-n', 'verrazzano-install' ];
+    executeFileCommand(kubectlExe, args, env).then(stdout => {
+      if (!stdout.includes(VZ_OPERATOR_SUCCESS_MESSAGE)) {
+        result.isSuccess = false;
+        result.reason = i18n.t('kubectl-verify-vz-operator-rollout-stdout-error-message', { message: stdout });
+      }
+      resolve(result);
+    }).catch(err => {
+      result.isSuccess = false;
+      result.reason = i18n.t('kubectl-verify-vz-operator-rollout-error-message', { error: getErrorMessage(err) });
+      resolve(result);
+    });
+  });
+}
+
+async function getVerrazzanoInstallationObject(kubectlExe, kubectlOptions) {
+  const getArgs = [ 'get', 'Verrazzano', '--output=json' ];
+  const httpsProxyUrl = getHttpsProxyUrl();
+  const bypassProxyHosts = getBypassProxyHosts();
+
+  const env = getKubectlEnvironment(kubectlOptions, httpsProxyUrl, bypassProxyHosts);
+
+  const result = {
+    isSuccess: false
+  };
+
+  return new Promise(resolve => {
+    executeFileCommand(kubectlExe, getArgs, env).then(vzJson => {
+      const vzObjectList = JSON.parse(vzJson).items;
+      if (vzObjectList.length > 0) {
+        const vzObject = vzObjectList[0];
+        result.isSuccess = true;
+        result.payload = vzObject;
+      }
+      resolve(result);
+    }).catch(err => {
+      result.reason = getErrorMessage(err);
+      resolve(result);
+    });
+  });
+}
+
+async function getKubernetesObjectsByNamespace(kubectlExe, kubectlOptions, type, namespace) {
+  const getArgs = [ 'get', type, '-n', namespace, '--output=json' ];
+  const httpsProxyUrl = getHttpsProxyUrl();
+  const bypassProxyHosts = getBypassProxyHosts();
+
+  const env = getKubectlEnvironment(kubectlOptions, httpsProxyUrl, bypassProxyHosts);
+
+  const result = {
+    isSuccess: false
+  };
+
+  return new Promise(resolve => {
+    executeFileCommand(kubectlExe, getArgs, env).then(vzJson => {
+      result.isSuccess = true;
+      result.payload = JSON.parse(vzJson).items || [];
+      resolve(result);
+    }).catch(err => {
+      result.reason = getErrorMessage(err);
+      resolve(result);
+    });
+  });
+}
+
+async function getKubernetesObjectsFromAllNamespaces(kubectlExe, kubectlOptions, type) {
+  const getArgs = [ 'get', type, '--all-namespaces', '--output=json' ];
+  const httpsProxyUrl = getHttpsProxyUrl();
+  const bypassProxyHosts = getBypassProxyHosts();
+
+  const env = getKubectlEnvironment(kubectlOptions, httpsProxyUrl, bypassProxyHosts);
+
+  const result = {
+    isSuccess: false
+  };
+
+  return new Promise(resolve => {
+    executeFileCommand(kubectlExe, getArgs, env).then(vzJson => {
+      result.isSuccess = true;
+      result.payload = JSON.parse(vzJson).items || [];
+      resolve(result);
+    }).catch(err => {
+      result.reason = getErrorMessage(err);
+      resolve(result);
+    });
+  });
+}
+
+async function verifyVerrazzanoComponentsDeployed(kubectlExe, componentNames, namespace, kubectlOptions) {
+  const httpsProxyUrl = getHttpsProxyUrl();
+  const bypassProxyHosts = getBypassProxyHosts();
+
+  const env = getKubectlEnvironment(kubectlOptions, httpsProxyUrl, bypassProxyHosts);
+
+  const result = {
+    isSuccess: true
+  };
+
+  const missingComponentNames = [];
+  for (const componentName of componentNames) {
+    const args = [ 'get', 'Component', componentName, '-n', namespace ];
+    try {
+      const stdout = await executeFileCommand(kubectlExe, args, env);
+      getLogger().debug('Found component %s in namespace %s: %s', componentName, namespace, stdout);
+    } catch (err) {
+      getLogger().warn('Error getting component %s in namespace %s: %s', componentName, namespace, getErrorMessage(err));
+      missingComponentNames.push(componentName);
+    }
+  }
+
+  if (missingComponentNames.length > 0) {
+    result.isSuccess = false;
+    result.reason = i18n.t('kubectl-verify-vz-components-deployed-error-message',
+      { namespace: namespace, missingComponents: missingComponentNames.join(', ')});
+  }
+  return Promise.resolve(result);
+}
 
 async function doCreateSecret(kubectlExe, createArgs, env, namespace, secret, resolve, results, key) {
-  executeFileCommand(kubectlExe, createArgs, env, true)
-    .then(() => resolve(results))
-    .catch(err => {
-      results.isSuccess = false;
-      results.reason = i18n.t(key,{ namespace: namespace, secret: secret, error: getErrorMessage(err) });
-      results.reason = maskPasswordInCommand(results.reason);
-      resolve(results);
-    });
+  executeFileCommand(kubectlExe, createArgs, env, true).then(() => {
+    resolve(results);
+  }).catch(err => {
+    results.isSuccess = false;
+    results.reason = i18n.t(key,{ namespace: namespace, secret: secret, error: getErrorMessage(err) });
+    results.reason = maskPasswordInCommand(results.reason);
+    resolve(results);
+  });
 }
 
 function maskPasswordInCommand(err) {
@@ -786,8 +1028,46 @@ function isNotFoundError(err) {
   return /\(NotFound\)/.test(errString);
 }
 
+function _getOperatorVersionFromLogs(operatorLogs, results) {
+  const versionRegex = /^Oracle WebLogic Kubernetes Operator, version:\s*(\d+\.\d+\.\d+),.*$/;
+  if (Array.isArray(operatorLogs) && operatorLogs.length > 0) {
+    for (const logEntry of operatorLogs) {
+      const parsedEntry = _parseLogEntryAsJson(logEntry);
+      if (typeof parsedEntry === 'undefined') {
+        continue;
+      }
+
+      const message = parsedEntry.message || '';
+      const match = message.match(versionRegex);
+      if (Array.isArray(match) && match.length > 1) {
+        results.isSuccess = true;
+        results.version = match[1];
+        getLogger().debug('Found installed operator version %s', results.version);
+        return;
+      }
+    }
+    results.isSuccess = false;
+    results.reason = i18n.t('kubectl-get-operator-version-not-found-error-message');
+  } else {
+    results.isSuccess = false;
+    results.reason = i18n.t('kubectl-get-operator-version-logs-empty-error-message');
+  }
+}
+
+function _parseLogEntryAsJson(logEntry) {
+  let result;
+
+  try {
+    result = JSON.parse(logEntry);
+  } catch (err) {
+    // Assume the entry is not in JSON format and return undefined
+  }
+  return result;
+}
+
 module.exports = {
   apply,
+  applyUsingUrl,
   createNamespaceIfNotExists,
   createNamespacesIfNotExists,
   createNamespaceLabelIfNotExists,
@@ -796,7 +1076,9 @@ module.exports = {
   createOrReplaceTLSSecret,
   createServiceAccountIfNotExists,
   getCurrentContext,
+  getOperatorVersion,
   isOperatorAlreadyInstalled,
+  isVerrazzanoInstalled,
   setCurrentContext,
   validateKubectlExe,
   deleteObjectIfExists,
@@ -805,10 +1087,17 @@ module.exports = {
   getK8sConfigView,
   getK8sClusterInfo,
   getWkoDomainStatus,
+  getApplicationStatus,
   getOperatorStatus,
   getOperatorVersionFromDomainConfigMap,
   getOperatorLogs,
+  getVerrazzanoInstallationObject,
+  getKubernetesObjectsByNamespace,
+  getKubernetesObjectsFromAllNamespaces,
   validateNamespacesExist,
   validateDomainExist,
-  verifyClusterConnectivity
+  validateApplicationExist,
+  verifyClusterConnectivity,
+  verifyVerrazzanoComponentsDeployed,
+  verifyVerrazzanoPlatformOperatorRollout,
 };

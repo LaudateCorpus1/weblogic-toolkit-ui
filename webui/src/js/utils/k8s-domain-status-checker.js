@@ -99,7 +99,7 @@ function (K8sDomainActionsBase, project, wktConsole, i18n, projectIo, dialogHelp
         if (typeof wkoDomainStatus === 'undefined') {
           wkoDomainStatus = {};
         }
-        const results = this.setDomainStatus(wkoDomainStatus, operatorMajorVersion);
+        const results = this.buildDomainStatus(wkoDomainStatus, operatorMajorVersion);
         results['domainStatus'] = wkoDomainStatus;
         const options = {domainStatus: results.domainStatus, domainOverallStatus: results.domainOverallStatus};
         dialogHelper.openDialog('domain-status-dialog', options);
@@ -133,128 +133,6 @@ function (K8sDomainActionsBase, project, wktConsole, i18n, projectIo, dialogHelp
         this.project.image.imageTag.validate(true), settingsFormConfig);
 
       return validationObject;
-    }
-
-    setDomainStatus(wkoDomainStatus, operatorMajorVersion) {
-      const status = wkoDomainStatus.status;
-      let result = {isSuccess: true, domainOverallStatus: 'Unknown'};
-
-      if (typeof status !== 'undefined' && 'conditions' in status && status['conditions'].length > 0) {
-        const conditions = status['conditions'];
-        // default status
-        result['domainOverallStatus'] = i18n.t('k8s-domain-status-checker-domain-status-unknown');
-        conditions.sort((a, b) => {
-          if (a.lastTransitionTime < b.lastTransitionTime) {
-            return 1;
-          }
-          if (a.lastTransitionTime > b.lastTransitionTime) {
-            return -1;
-          }
-          return 0;
-        });
-
-        if (operatorMajorVersion < 4) {
-          const hasErrors = this.hasErrorConditions(conditions);
-          const latestCondition = conditions[0];
-
-          if (hasErrors.error) {
-            //  There seems to be a problem in the operator where the latest condition is progressing but
-            // there is an error previously but
-            result['domainOverallStatus'] = i18n.t('k8s-domain-status-checker-domain-status-failed',
-              {reason: hasErrors.reason});
-          } else if (latestCondition.type === 'Failed') {
-            result['domainOverallStatus'] = i18n.t('k8s-domain-status-checker-domain-status-failed',
-              {reason: latestCondition.reason});
-          } else if (latestCondition.type === 'Progressing') {
-            // Progressing maybe the domain is coming up, maybe the introspector is running
-            result['domainOverallStatus'] = i18n.t('k8s-domain-status-checker-domain-status-progressing',
-              {reason: latestCondition.reason});
-          } else if (latestCondition.type === 'Available') {
-            result['domainOverallStatus'] = 'Progressing';
-            if (status['clusters'].length > 0) {
-              const clusters = status['clusters'];
-              let ready = true;
-              clusters.forEach((cluster) => {
-                if (Number(cluster['replicasGoal']) !== Number(cluster['readyReplicas'])) {
-                  ready = false;
-                }
-              });
-
-              if (ready) {
-                result['domainOverallStatus'] = i18n.t('k8s-domain-status-checker-domain-status-complete');
-              } else {
-                result['domainOverallStatus'] = i18n.t('k8s-domain-status-checker-domain-status-available');
-              }
-            } else {
-              // remain in progressing
-            }
-          }
-        } else {
-          ///
-          const hasErrors = this.hasErrorConditions(conditions);
-          const completeCondition = this.getCompletedCondition(conditions);
-          const availableCondition = this.getAvailableCondition(conditions);
-
-          if (hasErrors.error) {
-            result['domainOverallStatus'] = i18n.t('k8s-domain-status-checker-domain-status-failed', {reason: hasErrors.reason});
-          } else if (completeCondition.status === 'True' && availableCondition.status === 'True') {
-            result['domainOverallStatus'] = i18n.t('k8s-domain-status-checker-domain-status-complete');
-          } else {
-            // Assume this is introspection progressing
-            if (completeCondition.status === 'False' && !this.hasAvailableCondition(conditions)) {
-              result['domainOverallStatus'] = i18n.t('k8s-domain-status-checker-domain-status-progressing');
-            } else if (completeCondition.status === 'False' && availableCondition.status === 'False') {
-              result['domainOverallStatus'] = i18n.t('k8s-domain-status-checker-domain-status-available');
-            } else {
-              // should never happened?
-              result['domainOverallStatus'] = i18n.t('k8s-domain-status-checker-domain-status-unknown');
-            }
-          }
-        }
-
-      } else {
-        // status not defined or no conditions - error in operator or namespace is not monitored
-        result['domainOverallStatus'] = i18n.t('k8s-domain-status-checker-domain-status-unknown');
-      }
-      return result;
-    }
-
-    hasErrorConditions(conditions) {
-      for (const condition of conditions) {
-        if (condition.type === 'Failed') {
-          return {error: true, reason: condition.reason};
-        }
-      }
-      return {error: false, reason: ''};
-    }
-
-    getCompletedCondition(conditions) {
-      const defaultCondition = {type: 'Completed', status: 'False'};
-      for (const condition of conditions) {
-        if (condition.type === 'Completed') {
-          return condition;
-        }
-      }
-      return defaultCondition;
-    }
-
-    getAvailableCondition(conditions) {
-      const defaultCondition = {type: 'Available', status: 'False'};
-      for (const condition of conditions) {
-        if (condition.type === 'Available') {
-          return condition;
-        }
-      }
-      return defaultCondition;
-    }
-
-    hasAvailableCondition(conditions) {
-      for (const condition of conditions) {
-        if (condition.type === 'Available') {
-          return true;
-        }
-      }
-      return false;
     }
   }
 

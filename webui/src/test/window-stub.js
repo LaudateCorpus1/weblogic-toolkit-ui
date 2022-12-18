@@ -1,6 +1,6 @@
 /**
  * @license
- * Copyright (c) 2021, Oracle and/or its affiliates.
+ * Copyright (c) 2021, 2022, Oracle and/or its affiliates.
  * Licensed under The Universal Permissive License (UPL), Version 1.0
  * as shown at https://oss.oracle.com/licenses/upl/
  * @ignore
@@ -11,9 +11,10 @@ const os = require('os');
 
 class WindowStub {
   constructor() {
+    // This is intentionally empty
   }
 
-  trial() {}
+  trial() { /* This is intentionally empty */ }
 
   static install(jsDom) {
     this._isWindows = false;
@@ -29,7 +30,7 @@ class WindowStub {
     const api = {
       k8s : {
         getKubeConfig: () => {
-          return 'fake-kube-config';
+          return ['fake-kube-config'];
         },
         getKubectlFilePath: () => {
           return '/fake/kubectl';

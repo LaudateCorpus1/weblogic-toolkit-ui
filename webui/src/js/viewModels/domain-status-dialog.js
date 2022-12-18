@@ -1,13 +1,13 @@
 /**
  * @license
- * Copyright (c) 2021, Oracle and/or its affiliates.
+ * Copyright (c) 2021, 2022, Oracle and/or its affiliates.
  * Licensed under The Universal Permissive License (UPL), Version 1.0 as shown at https://oss.oracle.com/licenses/upl/
  */
 'use strict';
 
-define(['accUtils', 'knockout', 'js-yaml', 'utils/i18n', 'models/wkt-project', 'ojs/ojinputtext',
+define(['accUtils', 'knockout', 'js-yaml', 'utils/i18n', 'models/wkt-project', 'utils/view-helper', 'ojs/ojinputtext',
   'ojs/ojlabel', 'ojs/ojbutton', 'ojs/ojdialog', 'ojs/ojformlayout', 'ojs/ojvalidationgroup'],
-function(accUtils, ko, jsyaml, i18n, project) {
+function(accUtils, ko, jsyaml, i18n, project, viewHelper) {
   function DomainStatusDialogModel(args) {
     const DIALOG_SELECTOR = '#domainStatusDialog';
 
@@ -20,11 +20,13 @@ function(accUtils, ko, jsyaml, i18n, project) {
     this.connected = () => {
       accUtils.announce('Show domain status dialog loaded.', 'assertive');
 
+      this.dialogContainer = $(DIALOG_SELECTOR)[0];
+
       // open the dialog after the current thread, which is loading this view model.
       // using oj-dialog initial-visibility="show" causes vertical centering issues.
-      setTimeout(function() {
-        $(DIALOG_SELECTOR)[0].open();
-      }, 1);
+      viewHelper.componentReady(this.dialogContainer).then(() => {
+        this.dialogContainer.open();
+      });
     };
 
     this.labelMapper = (labelId) => {
@@ -36,7 +38,7 @@ function(accUtils, ko, jsyaml, i18n, project) {
     };
 
     this.okInput = () => {
-      $(DIALOG_SELECTOR)[0].close();
+      this.dialogContainer.close();
     };
 
     this.makeYamlOutput = (data) => {
@@ -52,13 +54,26 @@ function(accUtils, ko, jsyaml, i18n, project) {
     this.domainServerStatus = '';
     this.introspectJobFailureCount = 0;
     this.domainHasError = false;
+    this.isOperatorVersion4orHigher = false;
+
+    if (!project.wko.installedVersion.hasValue() ||
+        window.api.utils.compareVersions(project.wko.installedVersion.value, '4.0.0') >= 0) {
+      this.isOperatorVersion4orHigher = true;
+    }
 
     if ('status' in this.domainStatus && 'conditions' in this.domainStatus.status) {
       this.domainConditions = this.makeYamlOutput(this.domainStatus.status.conditions);
       this.domainClusterStatus = this.makeYamlOutput(this.domainStatus.status.clusters);
       this.domainServerStatus = this.makeYamlOutput(this.domainStatus.status.servers);
       this.domainName = this.domainStatus.spec.domainUID;
-      this.introspectJobFailureCount = this.domainStatus.status.introspectJobFailureCount;
+      if (this.isOperatorVersion4orHigher) {
+        // 4.0 higher is not named introspectJobFailureCount but observeredGeneation in the status
+        // text in the diaglog have been changed to Observed Generation to match, this is just a holder of the value
+        this.introspectJobFailureCount = this.domainStatus.status.observedGeneration;
+      } else {
+        this.introspectJobFailureCount = this.domainStatus.status.introspectJobFailureCount;
+      }
+
       const conditions = this.domainStatus.status.conditions;
       conditions.sort((a, b) => {
         if ( a.lastTransitionTime < b.lastTransitionTime ){

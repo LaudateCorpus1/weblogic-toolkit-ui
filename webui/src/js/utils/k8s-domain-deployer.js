@@ -107,14 +107,8 @@ function (K8sDomainActionsBase, project, wktConsole, i18n, projectIo, dialogHelp
         const helmChartValues = {};
         switch (operatorNamespaceStrategy) {
           case 'LabelSelector':
-            const label = this.project.wko.operatorDomainNamespaceSelector.value;
-            const labelResults =
-              await window.api.ipc.invoke('k8s-label-namespace', kubectlExe, domainNamespace, label, kubectlOptions);
-            if (!labelResults.isSuccess) {
-              const errMessage = i18n.t('k8s-domain-deployer-label-ns-error-message',
-                {label: label, domainNamespace: domainNamespace, error: labelResults.reason});
-              dialogHelper.closeBusyDialog();
-              await window.api.ipc.invoke('show-error-message', errTitle, errMessage);
+            const labels = [ this.project.wko.operatorDomainNamespaceSelector.value ];
+            if (! await this.labelKubernetesNamespace(kubectlExe, kubectlOptions, domainNamespace, labels, errTitle, errPrefix)) {
               return Promise.resolve(false);
             }
             break;
@@ -130,9 +124,14 @@ function (K8sDomainActionsBase, project, wktConsole, i18n, projectIo, dialogHelp
         }
 
         // Run helm upgrade so that operator picks up the new namespace.
+        //
+        // Skip passing kubectlExe and kubectlOptions args since the installed version
+        // of operator was already set.
+        //
+        const operatorVersion = this.project.wko.installedVersion.value;
         const helmOptions = helmHelper.getHelmOptions();
         const upgradeResults = await window.api.ipc.invoke('helm-update-wko', helmExe, operatorName,
-          operatorNamespace, helmChartValues, helmOptions);
+          operatorVersion, operatorNamespace, helmChartValues, helmOptions);
         if (!upgradeResults.isSuccess) {
           const errMessage = i18n.t('k8s-domain-deployer-add-domain-error-message',
             {
@@ -249,18 +248,16 @@ function (K8sDomainActionsBase, project, wktConsole, i18n, projectIo, dialogHelp
           {domainName: domainUid, domainNamespace: domainNamespace});
         dialogHelper.updateBusyDialog(busyDialogMessage, 12 / totalSteps);
         if (this.project.settings.targetDomainLocation.value === 'mii') {
-          if (!this.project.k8sDomain.configMapIsEmpty()) {
-            const configMapData = this.k8sDomainConfigMapGenerator.generate().join('\n');
-            wktLogger.debug(configMapData);
-            const mapResults = await (window.api.ipc.invoke('k8s-apply', kubectlExe, configMapData, kubectlOptions));
-            if (!mapResults.isSuccess) {
-              const configMapName = this.project.k8sDomain.modelConfigMapName.value;
-              const errMessage = i18n.t('k8s-domain-deployer-create-config-map-failed-error-message',
-                {configMapName: configMapName, domainNamespace: domainNamespace, error: mapResults.reason});
-              dialogHelper.closeBusyDialog();
-              await window.api.ipc.invoke('show-error-message', errTitle, errMessage);
-              return Promise.resolve(false);
-            }
+          const configMapData = this.k8sDomainConfigMapGenerator.generate().join('\n');
+          wktLogger.debug(configMapData);
+          const mapResults = await (window.api.ipc.invoke('k8s-apply', kubectlExe, configMapData, kubectlOptions));
+          if (!mapResults.isSuccess) {
+            const configMapName = this.project.k8sDomain.modelConfigMapName.value;
+            const errMessage = i18n.t('k8s-domain-deployer-create-config-map-failed-error-message',
+              {configMapName: configMapName, domainNamespace: domainNamespace, error: mapResults.reason});
+            dialogHelper.closeBusyDialog();
+            await window.api.ipc.invoke('show-error-message', errTitle, errMessage);
+            return Promise.resolve(false);
           }
         }
 
@@ -268,7 +265,7 @@ function (K8sDomainActionsBase, project, wktConsole, i18n, projectIo, dialogHelp
         busyDialogMessage = i18n.t('k8s-domain-deployer-deploy-in-progress',
           {domainName: domainUid, domainNamespace: domainNamespace});
         dialogHelper.updateBusyDialog(busyDialogMessage, 13 / totalSteps);
-        const domainSpecData = this.k8sDomainResourceGenerator.generate().join('\n');
+        const domainSpecData = new K8sDomainResourceGenerator(this.project.wko.installedVersion.value).generate().join('\n');
         const domainResult = await (window.api.ipc.invoke('k8s-apply', kubectlExe, domainSpecData, kubectlOptions));
         dialogHelper.closeBusyDialog();
         if (domainResult.isSuccess) {
@@ -309,6 +306,8 @@ function (K8sDomainActionsBase, project, wktConsole, i18n, projectIo, dialogHelp
       validationObject.addField('domain-design-uid-label', this.project.k8sDomain.uid.validate(true), domainFormConfig);
       validationObject.addField('domain-design-namespace-label',
         this.project.k8sDomain.kubernetesNamespace.validate(true), domainFormConfig);
+      validationObject.addField('domain-design-wko-installed-version-label',
+        validationHelper.validateRequiredField(this.project.wko.installedVersion.value), domainFormConfig);
 
       const kubectlFormConfig = validationObject.getDefaultConfigObject();
       kubectlFormConfig.formName = 'kubectl-form-name';
@@ -417,10 +416,9 @@ function (K8sDomainActionsBase, project, wktConsole, i18n, projectIo, dialogHelp
         }
       }
 
-      if (!this.project.k8sDomain.configMapIsEmpty()) {
+      if (this.project.settings.targetDomainLocation.value === 'mii') {
         validationObject.addField('domain-design-configmap-label',
           this.project.k8sDomain.modelConfigMapName.validate(true), domainFormConfig);
-        // The fields in the table should not require validation since no empty override values should be in this computed table.
       }
 
       return validationObject;
@@ -429,7 +427,7 @@ function (K8sDomainActionsBase, project, wktConsole, i18n, projectIo, dialogHelp
     async checkOperatorIsInstalled(kubectlExe, kubectlOptions, operatorName, operatorNamespace, errTitle) {
       try {
         const isInstalledResults =
-          await window.api.ipc.invoke('is-wko-installed', kubectlExe, operatorName, operatorNamespace, kubectlOptions);
+          await window.api.ipc.invoke('is-wko-installed', kubectlExe, operatorNamespace, kubectlOptions);
         if (!isInstalledResults.isInstalled) {
           let errMessage;
           if (isInstalledResults.reason) {

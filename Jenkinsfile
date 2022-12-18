@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2021, Oracle and/or its affiliates.
+ * Copyright (c) 2021, 2022, Oracle and/or its affiliates.
  * Licensed under the Universal Permissive License v 1.0 as shown at https://oss.oracle.com/licenses/upl.
  */
 pipeline {
@@ -10,10 +10,12 @@ pipeline {
         GLOBAL_AGENT_HTTPS_PROXY = "${WKTUI_PROXY}"
         WKTUI_DEV_PROXY = "${WKTUI_PROXY}"
         WKTUI_BUILD_EMAIL = sh(returnStdout: true, script: "echo ${env.WKTUI_BUILD_NOTIFY_EMAIL} | sed -e 's/^[[:space:]]*//'")
+        WKTUI_PROXY_HOST = "${env.ORACLE_HTTP_PROXY_HOST}"
+        WKTUI_PROXY_PORT = "${env.ORACLE_HTTP_PROXY_PORT}"
 
         npm_registry = "${env.ARTIFACTORY_NPM_REPO}"
         npm_noproxy = "${env.ORACLE_NO_PROXY}"
-        node_version = "16.13.0"
+        node_version = "16.17.0"
 
         project_name = "$JOB_NAME"
         version_prefix = sh(returnStdout: true, script: 'cat electron/package.json | grep version | awk \'match($0, /[0-9]+.[0-9]+.[0-9]+/) { print substr( $0, RSTART, RLENGTH )}\'').trim()
@@ -24,6 +26,13 @@ pipeline {
         downstream_job_name = "wktui-sign"
         TAG_NAME = sh(returnStdout: true, script: '/usr/bin/git describe --abbrev=0 --tags').trim()
         is_release = "true"
+
+        sonarscanner_version = '4.7.0.2747'
+        sonarscanner_zip_file = "sonar-scanner-cli-${sonarscanner_version}.zip"
+        sonarscanner_download_url = "https://binaries.sonarsource.com/Distribution/sonar-scanner-cli/${sonarscanner_zip_file}"
+
+        sonar_org = 'oracle'
+        sonar_project_key = "${sonar_org}_weblogic-toolkit-ui"
     }
     stages {
         stage('Compute file version number') {
@@ -53,6 +62,9 @@ pipeline {
                         linux_node_exe = "${linux_node_dir}/bin/node"
                         linux_npm_modules_dir = "${linux_node_dir}/lib"
                         linux_npm_exe = "${linux_node_dir}/bin/npm"
+
+                        sonarscanner_install_dir = "${WORKSPACE}/sonar-scanner-${sonarscanner_version}"
+                        sonarscanner_exe = "${sonarscanner_install_dir}/bin/sonar-scanner"
                     }
                     stages {
                         stage('Linux Echo Environment') {
@@ -97,15 +109,6 @@ pipeline {
                                 sh 'cp ${WORKSPACE}/.npmrc ${WORKSPACE}/electron/.npmrc'
                             }
                         }
-                        stage('Linux Update NPM') {
-                            steps {
-                                sh 'cp -f ${WORKSPACE}/.npmrc ${linux_node_dir}/lib/.npmrc'
-                                sh 'cd ${linux_node_dir}/lib; PATH="${linux_node_dir}/bin:$PATH" ${linux_npm_exe} install npm; cd ${WORKSPACE}'
-                                sh 'rm -f ${linux_node_dir}/lib/.npmrc'
-                                sh 'PATH="${linux_node_dir}/bin:$PATH" ${linux_node_exe} --version'
-                                sh 'PATH="${linux_node_dir}/bin:$PATH" ${linux_npm_exe} --version'
-                            }
-                        }
                         stage('Linux Install Project Dependencies') {
                             steps {
                                 sh 'cat ${WORKSPACE}/webui/.npmrc'
@@ -119,10 +122,57 @@ pipeline {
                                 sh 'cd ${WORKSPACE}/electron; PATH="${linux_node_dir}/bin:$PATH" ${linux_npm_exe} run install-tools; cd ${WORKSPACE}'
                             }
                         }
-                        stage('Linux Run Unit Tests') {
+                        stage('Install SonarScanner') {
                             steps {
-                                sh 'cd ${WORKSPACE}/electron; PATH="${linux_node_dir}/bin:$PATH" ${linux_npm_exe} test; cd ${WORKSPACE}'
-                                sh 'cd ${WORKSPACE}/webui; PATH="${linux_node_dir}/bin:$PATH" ${linux_npm_exe} test; cd ${WORKSPACE}'
+                                sh "curl -x ${WKTUI_PROXY} ${sonarscanner_download_url} --output ${WORKSPACE}/${sonarscanner_zip_file}"
+                                sh "unzip ${WORKSPACE}/${sonarscanner_zip_file}"
+                                sh "rm -f ${WORKSPACE}/${sonarscanner_zip_file}"
+                            }
+                        }
+                        stage('Linux Run Unit Tests with Coverage') {
+                            steps {
+                                sh 'cd ${WORKSPACE}/electron; PATH="${linux_node_dir}/bin:$PATH" ${linux_npm_exe} run coverage; cd ${WORKSPACE}'
+                                sh 'cd ${WORKSPACE}/webui; PATH="${linux_node_dir}/bin:$PATH" ${linux_npm_exe} run coverage; cd ${WORKSPACE}'
+                            }
+                        }
+                        stage('Run Sonar Analysis') {
+                            tools {
+                                jdk "JDK 11.0.9"
+                            }
+                            environment {
+                                sonarscanner_config_file = "${sonarscanner_install_dir}/conf/sonar-scanner.properties"
+                                electron_coverage = "${WORKSPACE}/electron/coverage/lcov.info"
+                                webui_coverage = "${WORKSPACE}/webui/coverage/lcov.info"
+                                electron_sources = "${WORKSPACE}/electron"
+                                webui_sources = "${WORKSPACE}/webui"
+                                wktui_sources = "${electron_sources},${webui_sources}"
+                                lcov_report_paths = "${electron_coverage},${webui_coverage}"
+                            }
+                            steps {
+                                echo "JAVA_HOME = ${JAVA_HOME}"
+                                sh "which java"
+                                sh "java -version"
+
+                                withSonarQubeEnv('SonarCloud') {
+                                    sh """
+                                        echo "sonar.host.url=${SONAR_HOST_URL}"                       >> ${sonarscanner_config_file}
+                                        echo "sonar.sourceEncoding=UTF-8"                             >> ${sonarscanner_config_file}
+                                        echo "sonar.organization=${sonar_org}"                        >> ${sonarscanner_config_file}
+                                        echo "sonar.projectKey=${sonar_project_key}"                  >> ${sonarscanner_config_file}
+                                        echo "sonar.projectVersion=${version_prefix}"                 >> ${sonarscanner_config_file}
+                                        echo "sonar.javascript.lcov.reportPaths=${lcov_report_paths}" >> ${sonarscanner_config_file}
+                                        echo "sonar.c.file.suffixes=-"                                >> ${sonarscanner_config_file}
+                                        echo "sonar.cpp.file.suffixes=-"                              >> ${sonarscanner_config_file}
+                                        echo "sonar.objc.file.suffixes=-"                             >> ${sonarscanner_config_file}
+                                        echo "sonar.sources=${wktui_sources}"                         >> ${sonarscanner_config_file}
+                                        cat "${sonarscanner_config_file}"
+
+                                        PATH="${linux_node_dir}/bin:${PATH}"; export PATH
+                                        SONAR_SCANNER_OPTS="-server -Dhttps.proxyHost=${WKTUI_PROXY_HOST} -Dhttps.proxyPort=${WKTUI_PROXY_PORT} -Dsonar.login=${SONAR_AUTH_TOKEN}"
+                                        export SONAR_SCANNER_OPTS
+                                        ${sonarscanner_exe}
+                                    """
+                                }
                             }
                         }
                         stage('Linux Run eslint') {
@@ -143,7 +193,7 @@ pipeline {
                     }
                 }
                 stage('MacOS Build') {
-                    agent { label 'macosx'}
+                    agent { label('wls-mini1 || wls-mini2') }
                     environment {
                         mac_node_dir_name = "node-v${node_version}-darwin-x64"
                         mac_node_installer = "node-v${node_version}-darwin-x64.tar.gz"
@@ -159,6 +209,7 @@ pipeline {
                                 sh 'env|sort'
                                 echo "file version = ${version_number}"
                                 echo "is_release = ${is_release}"
+                                sh "uname -a"
                             }
                         }
                         stage('MacOS Checkout') {
@@ -192,15 +243,6 @@ pipeline {
                                 echo 'Copying .npmrc file to project subdirectories'
                                 sh 'cp ${WORKSPACE}/.npmrc ${WORKSPACE}/webui/.npmrc'
                                 sh 'cp ${WORKSPACE}/.npmrc ${WORKSPACE}/electron/.npmrc'
-                            }
-                        }
-                        stage('MacOS Update NPM') {
-                            steps {
-                                sh 'cp -f ${WORKSPACE}/.npmrc ${mac_node_dir}/lib/.npmrc'
-                                sh 'cd ${mac_node_dir}/lib; PATH="${mac_node_dir}/bin:$PATH" ${mac_npm_exe} install npm; cd ${WORKSPACE}'
-                                sh 'rm -f ${mac_node_dir}/lib/.npmrc'
-                                sh 'PATH="${mac_node_dir}/bin:$PATH" ${mac_node_exe} --version'
-                                sh 'PATH="${mac_node_dir}/bin:$PATH" ${mac_npm_exe} --version'
                             }
                         }
                         stage('MacOS Install Project Dependencies') {
@@ -238,13 +280,21 @@ pipeline {
                         }
                         stage('MacOS Build Installers') {
                             steps {
-                                sh 'cd ${WORKSPACE}/electron; PATH="${mac_node_dir}/bin:$PATH" HTTPS_PROXY=${WKTUI_PROXY} CSC_IDENTITY_AUTO_DISCOVERY=false ${mac_npm_exe} run build'
+                                sh '''
+                                    cd "${WORKSPACE}/electron"
+                                    PATH="${mac_node_dir}/bin:$PATH" HTTPS_PROXY=${WKTUI_PROXY} CSC_IDENTITY_AUTO_DISCOVERY=false ${mac_npm_exe} run build:jet
+                                    PATH="${mac_node_dir}/bin:$PATH" HTTPS_PROXY=${WKTUI_PROXY} CSC_IDENTITY_AUTO_DISCOVERY=false ${mac_npm_exe} run install-tools
+                                    PATH="${mac_node_dir}/bin:$PATH" HTTPS_PROXY=${WKTUI_PROXY} CSC_IDENTITY_AUTO_DISCOVERY=false ${mac_npm_exe} run build:installer -- --mac --x64 --arm64
+                                    cd "${WORKSPACE}"
+                                '''
                                 archiveArtifacts 'dist/*.dmg'
                                 archiveArtifacts 'dist/*.zip'
                                 archiveArtifacts "dist/*.blockmap"
                                 archiveArtifacts "dist/latest-mac.yml"
                                 sh 'ditto -c -k --sequesterRsrc --keepParent "$WORKSPACE/dist/mac/WebLogic Kubernetes Toolkit UI.app" "WebLogic Kubernetes Toolkit UI.app.zip"'
                                 archiveArtifacts "WebLogic Kubernetes Toolkit UI.app.zip"
+                                sh 'ditto -c -k --sequesterRsrc --keepParent "$WORKSPACE/dist/mac-arm64/WebLogic Kubernetes Toolkit UI.app" "WebLogic Kubernetes Toolkit UI.arm64.app.zip"'
+                                archiveArtifacts "WebLogic Kubernetes Toolkit UI.arm64.app.zip"
                             }
                         }
                     }
@@ -308,13 +358,6 @@ pipeline {
                                 bat 'copy /Y "%WORKSPACE%\\.npmrc" "%WORKSPACE%\\electron\\.npmrc"'
                             }
                         }
-                        stage('Windows Update NPM') {
-                            steps {
-                                bat 'copy /Y "%WORKSPACE%\\.npmrc" "%windows_node_dir%\\.npmrc"'
-                                bat 'cd "%windows_node_dir%" & set "PATH=%windows_node_dir%;%PATH%" & "%windows_npm_exe%" install npm@latest & cd "%WORKSPACE%"'
-                                bat 'del /F /Q "%windows_node_dir%\\.npmrc"'
-                            }
-                        }
                         stage('Windows Install Project Dependencies') {
                             steps {
                                 bat 'cd "%WORKSPACE%\\electron" & set "PATH=%windows_node_dir%;%PATH%" & set HTTPS_PROXY=%ORACLE_HTTP_PROXY% & "%windows_npm_exe%" install & cd "%WORKSPACE%"'
@@ -335,6 +378,9 @@ pipeline {
                         stage('Windows Build Installers') {
                             steps {
                                 bat 'cd "%WORKSPACE%\\electron" & set "PATH=%windows_node_dir%;%PATH%" & set "HTTPS_PROXY=%WKTUI_PROXY%" & "%windows_npm_exe%" run build & cd "%WORKSPACE%"'
+                                // bat 'cd "%WORKSPACE%\\webui" & set "PATH=%windows_node_dir%;%PATH%" & set "HTTPS_PROXY=%WKTUI_PROXY%" & "node_modules\\.bin\\ojet" build web --release & cd "%WORKSPACE%"'
+                                // bat 'cd "%WORKSPACE%\\electron" & set "PATH=%windows_node_dir%;%PATH%" & set "HTTPS_PROXY=%WKTUI_PROXY%" & "%windows_node_exe%" scripts/installTools.js & cd "%WORKSPACE%"'
+                                // bat 'cd "%WORKSPACE%\\electron" & set "PATH=%windows_node_dir%;%PATH%" & set "HTTPS_PROXY=%WKTUI_PROXY%" & "node_modules\\.bin\\electron-builder" -p never & cd "%WORKSPACE%"'
                                 archiveArtifacts 'dist/*.exe'
                                 archiveArtifacts "dist/*.blockmap"
                                 archiveArtifacts "dist/latest.yml"

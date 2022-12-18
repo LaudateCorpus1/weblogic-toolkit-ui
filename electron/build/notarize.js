@@ -1,3 +1,8 @@
+/**
+ * @license
+ * Copyright (c) 2021, 2022, Oracle and/or its affiliates.
+ * Licensed under the Universal Permissive License v 1.0 as shown at https://oss.oracle.com/licenses/upl.
+ */
 const { notarize } = require('electron-notarize');
 const path = require('path');
 const fs = require('fs');
@@ -61,7 +66,7 @@ function getAppId(context) {
 }
 
 exports.default = async function notarizing(context) {
-  const { electronPlatformName, appOutDir } = context;
+  const { electronPlatformName } = context;
   if (electronPlatformName !== 'darwin' || process.env.CSC_IDENTITY_AUTO_DISCOVERY === 'false') {
     return;
   }

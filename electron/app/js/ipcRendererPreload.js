@@ -12,12 +12,15 @@ const fsUtils = require('./fsUtils');
 const WktApp = require('./wktApp');
 const osUtils = require('./osUtils');
 const i18n = require('./i18next.webui.config');
+const { compareVersions, getMinorVersionCompatibilityVersionString } = require('./versionUtils');
+const { wlRemoteConsoleFrontendVersion } = require('../webui.json');
 
 const wktApp = new WktApp();
 
 const exeMode = osUtils.getArgv('--wktMode');
 const language = osUtils.getArgv('--lang');
 const mainModule = osUtils.getArgv('--mainModule');
+const wrcFrontendCompatibilityVersion = getMinorVersionCompatibilityVersionString(wlRemoteConsoleFrontendVersion);
 
 i18n.changeLanguage(language).then();
 
@@ -28,6 +31,8 @@ contextBridge.exposeInMainWorld(
       send: (channel, ...args) => {
         const validChannels = [
           'close-window',
+          'download-file',
+          'new-project',
           'open-project',
           'window-app-quit',
           'window-is-ready',
@@ -50,6 +55,7 @@ contextBridge.exposeInMainWorld(
           'project-created',
           'project-opened',
           'project-saved',
+          'set-wrc-backend-port',
           'start-add-model-file',
           'start-add-variable-file',
           'start-add-archive-file',
@@ -64,6 +70,8 @@ contextBridge.exposeInMainWorld(
           'show-startup-dialogs',
           'app-update-available',
           'blur-focused-item',
+          'start-new-project',
+          'start-open-project',
           'start-prepare-model',
           'start-validate-model',
           'start-create-image',
@@ -81,6 +89,12 @@ contextBridge.exposeInMainWorld(
           'start-k8s-domain-deploy',
           'start-k8s-domain-undeploy',
           'start-get-k8s-domain-status',
+          'start-verrazzano-install',
+          'start-get-verrazzano-install-status',
+          'start-deploy-verrazzano-component',
+          'start-undeploy-verrazzano-component',
+          'start-deploy-verrazzano-application',
+          'start-undeploy-verrazzano-application',
           'start-app-quit',
           'start-window-close'
         ];
@@ -111,7 +125,10 @@ contextBridge.exposeInMainWorld(
           'get-image-builder-exe',
           'get-kube-config-files',
           'get-latest-wko-image-name',
+          'get-latest-wko-version-number',
+          'get-wko-release-versions',
           'get-archive-entry-types',
+          'get-archive-entry',
           'get-network-settings',
           'choose-archive-file',
           'choose-archive-entry',
@@ -176,6 +193,7 @@ contextBridge.exposeInMainWorld(
           'k8s-get-service-details',
           'k8s-get-ingresses',
           'k8s-get-operator-version-from-domain-config-map',
+          'k8s-get-operator-version',
           'k8s-get-k8s-config',
           'k8s-get-k8s-cluster-info',
           'k8s-get-wko-domain-status',
@@ -198,7 +216,29 @@ contextBridge.exposeInMainWorld(
           'k8s-delete-object',
           'openssl-generate-certs',
           'validate-k8s-namespaces-exist',
-          'validate-wko-domain-exist'
+          'validate-wko-domain-exist',
+          'validate-vz-application-exist',
+          'vz-get-application-status',
+          'get-wrc-home-directory',
+          'get-wrc-app-image',
+          'wrc-get-home-default-value',
+          'wrc-set-home-and-start',
+          'get-verrazzano-release-versions',
+          'is-verrazzano-installed',
+          'install-verrazzano-platform-operator',
+          'verify-verrazzano-platform-operator-install',
+          'install-verrazzano',
+          'verify-verrazzano-install-status',
+          'deploy-verrazzano-components',
+          'undeploy-verrazzano-components',
+          'get-verrazzano-component-names',
+          'get-verrazzano-secret-names',
+          'get-verrazzano-cluster-names',
+          'get-verrazzano-deployment-names-all-namespaces',
+          'verify-verrazzano-components-exist',
+          'deploy-verrazzano-project',
+          'deploy-verrazzano-application',
+          'undeploy-verrazzano-application',
         ];
         return new Promise((resolve, reject) => {
           if (validChannels.includes(channel)) {
@@ -247,7 +287,9 @@ contextBridge.exposeInMainWorld(
     },
     'utils': {
       generateUuid: () => uuid.v4(),
-      mainModule: mainModule
+      compareVersions: (version, otherVersion) => compareVersions(version, otherVersion),
+      mainModule: mainModule,
+      wrcFrontendCompatibilityVersion: wrcFrontendCompatibilityVersion,
     }
   }
 );

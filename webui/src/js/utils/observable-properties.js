@@ -1,6 +1,6 @@
 /**
  * @license
- * Copyright (c) 2021, Oracle and/or its affiliates.
+ * Copyright (c) 2021, 2022, Oracle and/or its affiliates.
  * Licensed under the Universal Permissive License v 1.0 as shown at https://oss.oracle.com/licenses/upl.
  */
 'use strict';
@@ -442,6 +442,10 @@ define(['knockout', 'utils/common-utilities', 'utils/validation-helper', 'utils/
         this.observable.push(this.createArrayItem(this, !!item ? item : {}));
       }
 
+      removeItemByIndex(index) {
+        this.observable.splice(index, 1);
+      }
+
       get observable() {
         if (this._observable == null) {
           this._observable = ko.observableArray(this.createList(this._defaultValue));
@@ -460,7 +464,8 @@ define(['knockout', 'utils/common-utilities', 'utils/validation-helper', 'utils/
       }
 
       anyPropertyDefined(element) {
-        return Object.keys(element).find(key => this.isDataKey(key) && (element[key] || element[key] === 0));
+        return Object.keys(element).find(key =>
+          this.isDataKey(key) && (element[key] || element[key] === 0 || element[key] === false));
       }
 
       get value() {
@@ -693,7 +698,7 @@ define(['knockout', 'utils/common-utilities', 'utils/validation-helper', 'utils/
     }
 
     function escape(s) {
-      return /[,;\n\s]/.test(s) ? `"${s}"` : s;
+      return /[,;\s]/.test(s) ? `"${s}"` : s;
     }
 
     function arrayToString(array) {

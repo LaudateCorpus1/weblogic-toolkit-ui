@@ -1,9 +1,12 @@
 /node_modules
 /app/web
 /app/staged-themes
+/app/webui.json
 /wktui.log
 /wktui-*.log
 /.docker
 /.kube
 /Library
 /.env
+/app/webui.json
+/coverage

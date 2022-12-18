@@ -1,6 +1,6 @@
 /**
  * @license
- * Copyright (c) 2021, Oracle and/or its affiliates.
+ * Copyright (c) 2021, 2022, Oracle and/or its affiliates.
  * Licensed under The Universal Permissive License (UPL), Version 1.0
  * as shown at https://oss.oracle.com/licenses/upl/
  * @ignore
@@ -510,7 +510,7 @@ describe('observable-properties-support', function () {
     });
 
     it('if not set, changes when source object changes', function () {
-      property.value;
+      property.value = undefined;
 
       sourceProperty1.observable('BAZ');
 
@@ -572,7 +572,7 @@ describe('observable-properties-support', function () {
     });
 
     it('if not set, changes when source object changes', function () {
-      property.value;
+      property.value = undefined;
 
       sourceProperty1.observable('BAZ');
 
@@ -779,7 +779,7 @@ describe('observable-properties-support', function () {
     it('looks to Oracle JET like an observable array', function () {
       expect(typeof property.observable).to.equal('function');
       expect(!!property.observable.subscribe).to.equal(true);
-      expect(!(property.observable['destroyAll'] === undefined)).to.equal(true);
+      expect(property.observable['destroyAll'] !== undefined).to.equal(true);
     });
 
     it('initially is not changed', function () {
@@ -955,11 +955,11 @@ describe('observable-properties-support', function () {
     });
 
     it('when value set, is marked changed', function() {
-      const property = utils.createArrayProperty(['foo', 'bar', 'baz']);
+      const _property = utils.createArrayProperty(['foo', 'bar', 'baz']);
 
-      property.value = NEW_DATA;
+      _property.value = NEW_DATA;
 
-      expect(property.isChanged()).to.be.true;
+      expect(_property.isChanged()).to.be.true;
     });
 
     it('when value changed, value to persist matches it', function() {
@@ -1119,14 +1119,13 @@ describe('observable-properties-support', function () {
         name: utils.createProperty('fred'),
         friends: utils.createArrayProperty(['joe']),
         size: utils.createProperty(7),
-        eventual: utils.createProperty(() => new Promise((resolve) => resolve('Yay!'))),
+        eventual: utils.createProperty(() => Promise.resolve('Yay!')),
         ignore: utils.createProperty(() => {
           throw new Error('called initializer');
         }),
         execs: utils.createListProperty(['name', 'title'])
           .withDefaultValue([{name: 'George', title: 'POTUS'}, {name: 'John', title: 'VEEP'}]),
-        doIt: function () {
-        }
+        doIt: function () { /* This is intentionally empty */ }
       };
     });
 

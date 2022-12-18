@@ -1,6 +1,6 @@
 /**
  * @license
- * Copyright (c) 2021, Oracle and/or its affiliates.
+ * Copyright (c) 2021, 2022, Oracle and/or its affiliates.
  * Licensed under the Universal Permissive License v 1.0 as shown at https://oss.oracle.com/licenses/upl.
  */
 'use strict';
@@ -101,6 +101,10 @@ function(i18n, Validator, ojvalidationError, RegExpValidator, LengthValidator, N
 
     this.validateRequiredField = (currentValue) => {
       return _validateRequiredFieldValue(currentValue);
+    };
+
+    this.validateRequiredFieldContainsNonWhitespaceCharacters = (currentValue) => {
+      return _validateRequiredFieldValueContainsNonWhitespaceCharacters(currentValue);
     };
 
     this.getRequiredFieldValidators = () => {
@@ -349,6 +353,20 @@ function(i18n, Validator, ojvalidationError, RegExpValidator, LengthValidator, N
       return requiredMessage;
     }
 
+    function _validateRequiredFieldValueContainsNonWhitespaceCharacters(value) {
+      let nonWhiteSpaceRegex = /\w+/g;
+
+      let requiredMessage;
+      if (value === undefined || value === null) {
+        requiredMessage = i18n.t('validation-helper-validate-field-value-is-not-defined');
+      } else if (value === '') {
+        requiredMessage = i18n.t('validation-helper-validate-string-field-value-is-empty');
+      } else if (!value.match(nonWhiteSpaceRegex)) {
+        requiredMessage = i18n.t('validation-helper-validate-string-field-value-is-only-whitespace');
+      }
+      return requiredMessage;
+    }
+
     const K8S_CPU_REGEX = [ /^[1-9]\d*[Mm]?$/, /^\d+(\.\d{1,3})?$/, /^0\.\d{1,3}$/ ];
     const K8S_CPU_HELP_URL = 'https://kubernetes.io/docs/concepts/configuration/manage-resources-containers/#meaning-of-cpu';
     function _validateK8sCpuValue(value) {
@@ -369,7 +387,7 @@ function(i18n, Validator, ojvalidationError, RegExpValidator, LengthValidator, N
       }
     }
 
-    const K8S_MEMORY_REGEX = /^[1-9]\d*((E|P|T|G|M|K)i?)?$/;
+    const K8S_MEMORY_REGEX = /^[1-9]\d*([EPTGMK]i?)?$/;
     const K8S_MEMORY_HELP_URL = 'https://kubernetes.io/docs/concepts/configuration/manage-resources-containers/#meaning-of-memory';
     function _validateK8sMemoryValue(value) {
       if (value && !K8S_MEMORY_REGEX.test(value)) {
@@ -377,7 +395,7 @@ function(i18n, Validator, ojvalidationError, RegExpValidator, LengthValidator, N
       }
     }
 
-    const JAVA_MEMORY_REGEX = /^[1-9]\d*(k|K|m|M|g|G)?$/;
+    const JAVA_MEMORY_REGEX = /^[1-9]\d*[kKmMgG]?$/;
     const JAVA_MEMORY_HELP_URL = 'https://docs.oracle.com/javase/8/docs/technotes/tools/windows/java.html#BABDJJFI';
     function _validateJavaMemoryValue(value) {
       if (value && !JAVA_MEMORY_REGEX.test(value)) {

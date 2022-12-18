@@ -62,10 +62,14 @@ function(accUtils, ko, i18n, project, IngressInstallScriptGenerator, IngressRout
     ];
     this.subviewsDP = new ArrayDataProvider(this.subviews, {keyAttributes: 'id'});
     this.selectedSubview = ko.observable('installScript');
+    this.selectedSubviewValueChangedHandler = (event) => {
+      this.selectedSubview(event.detail.value);
+      this.renderScript(event.detail.value);
+    };
 
-    this.selectedSubview.subscribe((subview) => {
-      this.renderScript(subview);
-    });
+    // this.selectedSubview.subscribe((subview) => {
+    //   this.renderScript(subview);
+    // });
 
     this.shellScriptType = ko.observable(IngressInstallScriptGenerator.getDefaultScriptingLanguage());
     const shellScriptTypes = [
@@ -110,6 +114,38 @@ function(accUtils, ko, i18n, project, IngressInstallScriptGenerator, IngressRout
       const generator = new IngressResourceGenerator();
       const lines = generator.generate();
       this.ingressRoutesYamlText(lines.join('\n'));
+    };
+
+    this.downloadInstaller = () => {
+      const format = this.shellScriptType();
+      const generator = new IngressInstallScriptGenerator(format);
+      const lines = generator.generate();
+      const fileType = i18n.t('script-file-type-label', {
+        type: i18n.t('nav-ingress'),
+        subType: i18n.t('ingress-code-install-script-title')
+      });
+      const formatLabel = this.shellLabelMapper(format + '-label');
+
+      window.api.ipc.send('download-file', lines, fileType, format, formatLabel);
+    };
+
+    this.downloadAddRoutesScript = () => {
+      const format = this.shellScriptType();
+      const generator = new IngressRoutesScriptGenerator(format);
+      const lines = generator.generate();
+      const fileType = i18n.t('ingress-code-add-routes-script-title');
+      const formatLabel = this.shellLabelMapper(format + '-label');
+
+      window.api.ipc.send('download-file', lines, fileType, format, formatLabel);
+    };
+
+    this.downloadRoutesResource = () => {
+      const generator = new IngressResourceGenerator();
+      const lines = generator.generate();
+      const fileType = i18n.t('ingress-code-ingress-yaml-title');
+      const formatLabel = this.shellLabelMapper('resource-file-format');
+
+      window.api.ipc.send('download-file', lines, fileType, 'yaml', formatLabel);
     };
   }
 

@@ -1,6 +1,6 @@
 /**
  * @license
- * Copyright (c) 2021, Oracle and/or its affiliates.
+ * Copyright (c) 2021, 2022, Oracle and/or its affiliates.
  * Licensed under The Universal Permissive License (UPL), Version 1.0
  * as shown at https://oss.oracle.com/licenses/upl/
  * @ignore
@@ -40,33 +40,35 @@ describe('model-page', function () {
     parentRouter: {
       createChildRouter: function() {
         return {
-          sync: function() {},
-          go: function() {}
+          sync: function() { /* This is intentionally empty */ },
+          go: function() { /* This is intentionally empty */ }
         };
       }
     }
   };
 
-  function ModuleRouterAdapterStub() {
-  }
+  function ModuleRouterAdapterStub() { /* This is intentionally empty */ }
 
   beforeEach(function () {
     viewModel = new ModelPageImpl(args, accUtilsStub, ko, i18next, ModuleRouterAdapterStub, ArrayDataProviderStub);
   });
 
   function getEntry(array, key, value) {
-    for (let i = 0; i < array.length; i++) {
-      if (array[i][key] === value) return array[i];
+    let result = undefined;
+    for (const item of array) {
+      if (item[key] === value) {
+        result = item;
+      }
     }
-    return undefined;
+    return result;
   }
 
   function entry(array, key, value) {
     return getEntry(array, key, value);
   }
 
-  it('the initial selection is the code view', function () {
-    expect(viewModel.selectedItem()).to.equal('model-code-view');
+  it('the initial selection is the design view', function () {
+    expect(viewModel.selectedItem()).to.equal('model-design-view');
   });
 
   xit('offers view choices choices', function () {

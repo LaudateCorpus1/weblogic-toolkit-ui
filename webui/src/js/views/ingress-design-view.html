@@ -1,5 +1,5 @@
 <!--
- Copyright (c) 2021, Oracle and/or its affiliates.
+ Copyright (c) 2021, 2022, Oracle and/or its affiliates.
  Licensed under The Universal Permissive License (UPL), Version 1.0 as shown at https://oss.oracle.com/licenses/upl/
  -->
 <h6 class="wkt-subheading"><oj-bind-text value="[[labelMapper('title')]]"></oj-bind-text></h6>
@@ -32,6 +32,12 @@
                        validators="[[project.ingress.validators.k8sNameValidator]]"
                        help.instruction="[[labelMapper('ingress-name-help')]]">
         </oj-input-text>
+        <oj-input-number label-hint="[[labelMapper('helm-timeout-label')]]"
+                         value="{{project.ingress.helmTimeoutMinutes.observable}}"
+                         min="1"
+                         max="60"
+                         help.instruction="[[labelMapper('helm-timeout-help')]]">
+        </oj-input-number>
         <oj-bind-if test="[[isVoyager() === true]]">
           <oj-select-single label-hint="[[labelMapper('voyager-provider-label')]]"
                             value="{{project.ingress.voyagerProvider.observable}}"
@@ -130,6 +136,7 @@
             <oj-button slot="end" display="icons" chroming="borderless"
                        on-oj-action="[[chooseTLSCertFile]]">
               <span slot="endIcon" class="oj-ux-ico-file-text" role="img"></span>
+              <oj-bind-text value="[[labelMapper('ingress-tlscertfile-tooltip')]]"></oj-bind-text>
             </oj-button>
           </oj-input-text>
         </oj-bind-if>
@@ -140,6 +147,7 @@
                          help.instruction="[[labelMapper('ingress-tlskeyfile-help')]]">
             <oj-button slot="end" display="icons" chroming="borderless" on-oj-action="[[chooseTLSKeyFile]]">
               <span slot="endIcon" class="oj-ux-ico-file-text" role="img"></span>
+              <oj-bind-text value="[[labelMapper('ingress-tlskeyfile-tooltip')]]"></oj-bind-text>
             </oj-button>
           </oj-input-text>
         </oj-bind-if>
@@ -157,6 +165,7 @@
                          help.instruction="[[labelMapper('openssl-exe-file-path-help')]]">
             <oj-button slot="end" display="icons" chroming="borderless" on-oj-action="[[chooseOpenSSL]]">
               <span slot="endIcon" class="oj-ux-ico-file-text" role="img"></span>
+              <oj-bind-text value="[[labelMapper('openssl-exe-file-path-tooltip')]]"></oj-bind-text>
             </oj-button>
           </oj-input-text>
         </oj-bind-if>
@@ -200,8 +209,7 @@
           <td>
             <oj-bind-text value="[[row.data.targetPort]]"></oj-bind-text>
           </td>
-          <oj-bind-if
-                  test="[[!isAccessPointDefined(row.data.accessPoint)]]">
+          <oj-bind-if test="[[!isAccessPointDefined(row.data.accessPoint)]]">
             <td>
               <oj-bind-text value="[[row.data.accessPoint]]"></oj-bind-text>
             </td>
@@ -217,13 +225,13 @@
           <td>
             <oj-button display="icons" chroming="borderless" on-oj-action="[[handleEditRoute]]">
               <span slot="endIcon" class="oj-ux-ico-edit"></span>
-              <oj-bind-text value="[[labelMapper('edit-route-label')]]"></oj-bind-text>
+              <oj-bind-text value="[[labelMapper('edit-route-tooltip')]]"></oj-bind-text>
             </oj-button>
           </td>
           <td>
             <oj-button display="icons" chroming="borderless" on-oj-action="[[handleDeleteRoute]]">
               <span slot="endIcon" class="oj-ux-ico-trash"></span>
-              <oj-bind-text value="[[labelMapper('delete-route-label')]]"></oj-bind-text>
+              <oj-bind-text value="[[labelMapper('delete-route-tooltip')]]"></oj-bind-text>
             </oj-button>
           </td>
         </tr>
@@ -236,7 +244,7 @@
       <template slot="headerTemplate" data-oj-as="header">
         <oj-button display="icons" chroming="borderless" on-oj-action="[[handleAddRoute]]">
           <span slot="endIcon" class="oj-ux-ico-plus"></span>
-          <oj-bind-text value="[[labelMapper('add-route-label')]]"></oj-bind-text>
+          <oj-bind-text value="[[labelMapper('add-route-tooltip')]]"></oj-bind-text>
         </oj-button>
       </template>
     </oj-table>

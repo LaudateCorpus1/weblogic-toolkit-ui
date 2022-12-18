@@ -1,6 +1,6 @@
 /**
  * @license
- * Copyright (c) 2021, Oracle and/or its affiliates.
+ * Copyright (c) 2021, 2022, Oracle and/or its affiliates.
  * Licensed under the Universal Permissive License v 1.0 as shown at https://oss.oracle.com/licenses/upl.
  */
 const { homepage, productName, version, copyright } = require('../../package.json');
@@ -74,16 +74,16 @@ class WktApp {
       throw new Error(`Failed to read version file ${versionFilePath}: ${errorUtils.getErrorMessage(err)}`);
     }
 
-    let version;
+    let buildVersion;
     if (!contents) {
-      version = defaultVersion;
+      buildVersion = defaultVersion;
     } else if (contents.startsWith('-')) {
       // dev build so concatenate the app version with the qualifier from the file
-      version = `${defaultVersion}${contents.trim()}`;
+      buildVersion = `${defaultVersion}${contents.trim()}`;
     } else {
       return contents.trim();
     }
-    return version;
+    return buildVersion;
   }
 }
 

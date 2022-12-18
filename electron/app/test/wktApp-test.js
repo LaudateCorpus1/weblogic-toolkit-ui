@@ -1,6 +1,6 @@
 /**
  * @license
- * Copyright (c) 2021, Oracle and/or its affiliates.
+ * Copyright (c) 2021, 2022, Oracle and/or its affiliates.
  * Licensed under the Universal Permissive License v 1.0 as shown at https://oss.oracle.com/licenses/upl.
  * @ignore
  */
@@ -46,8 +46,6 @@ describe('WKT App tests', () => {
   const WktMode = proxyquire('../js/wktMode', { electron: electronStub });
 
   function getDefaultVersionNumber() {
-    const packageJsonFileName = path.normalize(path.join(__dirname, '..', '..', 'package.json'));
-    const packageJson = require(packageJsonFileName);
     const wktuiVersionFileName = path.normalize(path.join(__dirname, '..', '..', '..', 'WKTUI_VERSION.txt'));
     const qualifier = readFileSync(wktuiVersionFileName, { encoding: 'utf8'});
     return `${packageJson.version}${qualifier.trim()}`;

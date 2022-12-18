@@ -1,6 +1,6 @@
 /**
  * @license
- * Copyright (c) 2021, Oracle and/or its affiliates.
+ * Copyright (c) 2021, 2022, Oracle and/or its affiliates.
  * Licensed under The Universal Permissive License (UPL), Version 1.0 as shown at https://oss.oracle.com/licenses/upl/
  */
 'use strict';
@@ -75,6 +75,19 @@ define(['utils/script-adapter-base'],
 
       getVariableReference(name) {
         return this.getEnvironmentVariableReference(name);
+      }
+
+      addHelmTimeoutCollectArgsBlock(comment, collectVarName, timeoutVarRef) {
+        if (comment) {
+          this.addComment(comment);
+        }
+
+        this._lines.push(
+          `IF DEFINED ${this._getVariableNameFromReference(timeoutVarRef)} (`,
+          `${this.indent(1)}SET "${collectVarName}=${this.getVariableReference(collectVarName)} ${timeoutVarRef}m"`,
+          ')',
+          ''
+        );
       }
 
       addNotEmptyCollectArgsBlock(collectVarName, varRef, valuePrefix) {
@@ -177,6 +190,12 @@ define(['utils/script-adapter-base'],
         }
 
         const variableRef = this.getVariableReference(variableName);
+        const serviceAccountLines = [
+          `IF "${helmChartValues.serviceAccount}" NEQ "" (`,
+          `${this.indent(1)}SET "${variableName}=${variableRef} --set serviceAccount=${helmChartValues.serviceAccount}"`,
+          ')'
+        ];
+
         const strategyLines = [
           `IF "${helmChartValues.domainNamespaceSelectionStrategy}" EQU "LabelSelector" (`,
           `${this.indent(1)}SET "${variableName}=${variableRef} --set domainNamespaceLabelSelector=${helmChartValues.domainNamespaceLabelSelector}"`,
@@ -250,10 +269,18 @@ define(['utils/script-adapter-base'],
           ')'
         ];
 
+        const helmTimeoutLines = [
+          `IF "${helmChartValues.timeout}" NEQ "" (`,
+          `${this.indent(1)}SET "${variableName}=${variableRef} --timeout ${helmChartValues.timeout}m"`,
+          ')',
+        ];
+
         const initialValue = `--set domainNamespaceSelectionStrategy=${helmChartValues.domainNamespaceSelectionStrategy}`;
         this.addVariableDefinition(variableName, initialValue);
         this._lines.push(
           ...strategyLines,
+          '',
+          ...serviceAccountLines,
           '',
           ...pullSecretsLines,
           '',
@@ -266,6 +293,8 @@ define(['utils/script-adapter-base'],
           ...elkIntegrationLines,
           '',
           ...javaLoggingLines,
+          '',
+          ...helmTimeoutLines,
           ''
         );
       }
@@ -297,6 +326,30 @@ define(['utils/script-adapter-base'],
           ...labelBlock,
           '',
           `:${skipLabel}`,
+          ''
+        );
+      }
+
+      addNotEmptyVariableKubectlApplyBlock(comment, variableReference, kubectlExe, yamlFile, errorMessage, successMessage) {
+        const args = `apply -f ${yamlFile}`;
+        const runBlock = this._formatRunCommandBlock(comment, kubectlExe, args, errorMessage, successMessage);
+
+        this._lines.push(
+          `IF "${variableReference}" NEQ "" (`,
+          ...this.prependToLines(this.indent(1), ...runBlock),
+          ')',
+          ''
+        );
+      }
+
+      addVariableEqualValueKubectlApplyBlock(comment, variableReference, variableValue, kubectlExe, yamlFile, errorMessage, successMessage) {
+        const args = `apply -f ${yamlFile}`;
+        const runBlock = this._formatRunCommandBlock(comment, kubectlExe, args, errorMessage, successMessage);
+
+        this._lines.push(
+          `IF "${variableReference}" EQ "${variableValue}" (`,
+          ...this.prependToLines(this.indent(1), ...runBlock),
+          ')',
           ''
         );
       }
